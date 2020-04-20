@@ -168,16 +168,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="HNSW.cpp" />
-    <ClCompile Include="Layer.cpp" />
-    <ClCompile Include="Node.cpp" />
+    <ClCompile Include="src/main.cpp" />
+    <ClCompile Include="src/hnsw.cpp" />
+    <ClCompile Include="src/layer.cpp" />
+    <ClCompile Include="src/node.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="HNSW.h" />
-    <ClInclude Include="Layer.h" />
-    <ClInclude Include="Node.h" />
-    <ClInclude Include="settings.h" />
+    <ClInclude Include="src/hnsw.h" />
+    <ClInclude Include="src/layer.h" />
+    <ClInclude Include="src/node.h" />
+    <ClInclude Include="src/settings.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

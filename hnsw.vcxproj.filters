@@ -15,30 +15,30 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="HNSW.cpp">
+    <ClCompile Include="src/hnsw.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Layer.cpp">
+    <ClCompile Include="src/layer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Node.cpp">
+    <ClCompile Include="src/node.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="main.cpp">
+    <ClCompile Include="src/main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="HNSW.h">
+    <ClInclude Include="src/hnsw.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Layer.h">
+    <ClInclude Include="src/layer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Node.h">
+    <ClInclude Include="src/node.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="settings.h">
+    <ClInclude Include="src/settings.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
