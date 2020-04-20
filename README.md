@@ -5,7 +5,6 @@ This is an implementation of the HNSW - aproximate KNN data structure:
 Malkov, Yu A., and D. A. Yashunin. "Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs." TPAMI, preprint: https://arxiv.org/abs/1603.09320
 
 # Data sets
-=========
 
 We have a number of precomputed data sets for this. All data sets are pre-split into train/test and come with ground truth data in the form of the top 100 neighbors. We store them in a HDF5 format:
 
