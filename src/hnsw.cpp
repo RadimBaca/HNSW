@@ -23,7 +23,7 @@ void HNSW::create(const char* filename, const char* datasetname)
 }
 
 
-void HNSW::query(const char* filename, const char* querydatasetname, const char* resultdatasetname)
+void HNSW::query(const char* filename, const char* querydatasetname, const char* resultdatasetname, int ef)
 {
     hsize_t dimensions_query[2];
     hsize_t dimensions_result[2];
@@ -40,7 +40,7 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
     double positive = 0;
     for (int i = 0; i < dimensions_query[0]; i++)
     {
-        knn(&data_query[i * dimensions_query[1]], k, 1000);
+        knn(&data_query[i * dimensions_query[1]], k, ef);
 
         int c1 = 0;
         int c2 = 0;
@@ -60,7 +60,7 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
     auto start = std::chrono::system_clock::now();
     for (int i = 0; i < dimensions_query[0]; i++)
     {
-        knn(&data_query[i * dimensions_query[1]], k, 1000);
+        knn(&data_query[i * dimensions_query[1]], k, ef);
     }
     auto end = std::chrono::system_clock::now();
     std::cout << (double)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 10000 << " [ms] \n";
@@ -78,9 +78,14 @@ void HNSW::insert(float* q)
     Node* down_node = nullptr;
     Node* prev = nullptr;
     Node* ep = nullptr;
+
+#ifdef VISIT_HASH
+    visited.clear();
+#endif
+
     visit_id++;
 
-    if ((visit_id % 10000) == 0)
+    if ((visit_id % 1000) == 0)
     {
         std::cout << visit_id << "\n";
     }
@@ -90,12 +95,16 @@ void HNSW::insert(float* q)
     {
         ep = layers[L]->enter_point;
         ep->distance = distance(ep->vector, q);
+#ifdef VISIT_HASH
+        visited.insert(ep->node_order);
+#else
         ep->visit_id = visit_id;
+#endif
         W.push_back(ep);
     }
     for (int32_t i = L; i > l; i--)
     {
-        search_layer(q, 2);
+        search_layer(q, 1);
         change_layer();
     }
     for (int32_t i = std::min(L, l); i >= 0; i--)
@@ -123,7 +132,7 @@ void HNSW::insert(float* q)
         {
             // IDEA - the shrink could be initiated after some delta
             auto e = ne.node;
-            if (i > 0 && e->neighbors.size() > Mmax)
+            if ((i > 0 && e->neighbors.size() > Mmax) || (i == 0 && e->neighbors.size() > Mmax0))
             {
                 // remove the most distant node
                 std::sort(e->neighbors.begin(), e->neighbors.end(), neighborcmp_nearest()); // TODO - do not perform sorting if already sorted
@@ -165,20 +174,22 @@ void HNSW::knn(float* q, int k, int ef)
     Node* ep = nullptr;
     visit_id++;
 
-    if ((visit_id % 10000) == 0)
-    {
-        std::cout << visit_id << "\n";
-    }
-
+#ifdef VISIT_HASH
+    visited.clear();
+#endif
     W.clear();
     ep = layers[L]->enter_point;
     ep->distance = distance(ep->vector, q);
+#ifdef VISIT_HASH
+    visited.insert(ep->node_order);
+#else
     ep->visit_id = visit_id;
+#endif
     W.push_back(ep);
 
     for (int32_t i = L; i > 0; i--)
     {
-        search_layer(q, 2);
+        search_layer(q, 1);
         change_layer();
     }
     search_layer(q, ef);
@@ -202,16 +213,22 @@ void HNSW::search_layer(float* q, int ef)
     {
         auto c = C.front();
         auto f = W.front();
-        std::pop_heap(C.begin(), C.end(), nodecmp_farest());
+        std::pop_heap(C.begin(), C.end(), nodecmp_nearest());
         C.pop_back();
 
         if (c->distance > f->distance) break;
         for (auto ne : c->neighbors)
         {
             auto e = ne.node;
+#ifdef VISIT_HASH
+            if (!visited.get(e->node_order))
+            { 
+                visited.insert(e->node_order);
+#else
             if (e->visit_id < visit_id)
             {
                 e->visit_id = visit_id;
+#endif
                 auto f = W.front();
                 e->distance = distance(e->vector, q);
                 if (e->distance < f->distance || W.size() < ef)

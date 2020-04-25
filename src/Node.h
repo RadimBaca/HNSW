@@ -7,10 +7,10 @@ class Node;
 
 struct Neighbors
 {
-	double distance;
+	float distance;
 	Node* node;
 
-	Neighbors(Node* node, double distance)
+	Neighbors(Node* node, float distance)
 	{
 		this->node = node;
 		this->distance = distance;
@@ -40,11 +40,16 @@ public:
 #endif
 
 	// runtime variables
-	double distance;
+	float distance;
+#ifndef VISIT_HASH
 	int visit_id;
+#endif
 
 	Node(int node_order, const int vector_size, const int neighbor_size, Node* lower_layer)
-		: lower_layer(lower_layer), visit_id(0)
+		: lower_layer(lower_layer)
+#ifndef VISIT_HASH
+		,visit_id(0)
+#endif
 	{
 		this->node_order = node_order;
 		uniqueId = maxid++;
@@ -73,7 +78,9 @@ public:
 	void copyInsertValues(const Node& node)
 	{
 		distance = node.distance;
+#ifndef VISIT_HASH
 		visit_id = node.visit_id;
+#endif
 	}
 
 };
