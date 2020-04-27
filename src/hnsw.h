@@ -36,7 +36,7 @@ public:
 	void clear()
 	{
 		item_count = 0;
-		memset(hasharray, 0, sizeof(uint32_t) * actual_size);
+		memset(hasharray, -1, sizeof(uint32_t) * actual_size);
 	}
 
 	void insert(uint32_t index)
@@ -47,7 +47,7 @@ public:
 		//}
 
 		uint32_t hash = index & mask;
-		while (hasharray[hash] != 0)
+		while (hasharray[hash] != -1)
 		{
 			hash++;
 			if (hash >= actual_size) {
@@ -61,7 +61,7 @@ public:
 	bool get(uint32_t index)
 	{
 		uint32_t hash = index & mask;
-		while (hasharray[hash] != 0)
+		while (hasharray[hash] != -1)
 		{
 			if (hasharray[hash] == index)
 			{
@@ -117,22 +117,43 @@ public:
 
 private: 
 	void search_layer(float* q, int ef);
+	void select_neighbors(std::vector<Node*>& R, int M, bool keepPruned);
+	inline bool is_distant_node(std::vector<Neighbors>& neighbors, float* node, float dist_from_q)
+	{
+		for (int i = 0; i < neighbors.size(); i++)
+		{
+			float dist = distance(node, neighbors[i].node->vector);
+			if (dist < dist_from_q)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
 
 	inline float distance(float* q, float* node)
 	{
-		size_t s = vector_size >> 2;
+		//size_t s = vector_size >> 2;
+		//float result = 0;
+		//for (unsigned int i = 0; i < vector_size; i+=4)
+		//{
+		//	float t = q[i] - node[i];
+		//	float r1 = t * t;
+		//	t = q[i + 1] - node[i + 1];
+		//	float r2 = t * t;
+		//	t = q[i + 2] - node[i + 2];
+		//	float r3 = t * t;
+		//	t = q[i + 3] - node[i + 3];
+		//	float r4 = t * t;
+		//	result += r1 + r2 + r3 + r4;
+		//}
+		//return result;
+
 		float result = 0;
-		for (unsigned int i = 0; i < vector_size; i+=4)
+		for (unsigned int i = 0; i < vector_size; i++)
 		{
 			float t = q[i] - node[i];
-			float r1 = t * t;
-			t = q[i + 1] - node[i + 1];
-			float r2 = t * t;
-			t = q[i + 2] - node[i + 2];
-			float r3 = t * t;
-			t = q[i + 3] - node[i + 3];
-			float r4 = t * t;
-			result += r1 + r2 + r3 + r4;
+			result += t * t;
 		}
 		return result;
 	}
@@ -144,6 +165,9 @@ private:
 			auto node = W[i];
 			W[i] = W[i]->lower_layer;
 			W[i]->copyInsertValues(*node);
+#ifdef VISIT_HASH
+			visited.insert(W[i]->uniqueId);
+#endif
 		}
 	}
 

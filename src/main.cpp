@@ -48,15 +48,17 @@ int main(void)
 
     auto start = std::chrono::system_clock::now();
 
-    HNSW hnsw(12, 12, 200, 0.75);
+    HNSW hnsw(16, 16, 200, 0.5);
     hnsw.create(FILE_NAME, "train");
 
     auto end = std::chrono::system_clock::now();
     double dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Insert time " << dur / 1000 << " [s] \n";
     hnsw.printInfo();
-    hnsw.query(FILE_NAME, "test", "neighbors", 75);
-
+    for (int i = 50; i < 120; i += 10)
+    {
+        hnsw.query(FILE_NAME, "test", "neighbors", i);
+    }
     return 0;
 }
 

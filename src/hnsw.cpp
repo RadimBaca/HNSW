@@ -78,6 +78,7 @@ void HNSW::insert(float* q)
     Node* down_node = nullptr;
     Node* prev = nullptr;
     Node* ep = nullptr;
+    std::vector<Node*> R;
 
 #ifdef VISIT_HASH
     visited.clear();
@@ -96,7 +97,7 @@ void HNSW::insert(float* q)
         ep = layers[L]->enter_point;
         ep->distance = distance(ep->vector, q);
 #ifdef VISIT_HASH
-        visited.insert(ep->node_order);
+        visited.insert(ep->uniqueId);
 #else
         ep->visit_id = visit_id;
 #endif
@@ -111,6 +112,7 @@ void HNSW::insert(float* q)
     {
         layers[i]->node_count++;
         Node* node = new Node(visit_id, vector_size, Mmax, nullptr, q);
+        auto actualMmax = (i == 0 ? Mmax0 : Mmax);
 #ifdef DEBUG_NET
         node->layer = i;
 #endif
@@ -122,23 +124,54 @@ void HNSW::insert(float* q)
 
         // the main logic
         search_layer(q, efConstruction);
-        std::sort(W.begin(), W.end(), nodecmp_farest()); // TODO, replace by SELECT-NEIGHBORS
-        for (int i = 0; i < M && i < W.size(); i++)
+        select_neighbors(R, M, false);
+
+        for (int i = 0;i < R.size(); i++)
         {
-            node->neighbors.emplace_back(W[i], W[i]->distance);
-            W[i]->neighbors.emplace_back(node, W[i]->distance);
-        }
-        for (auto ne : node->neighbors)
-        {
-            // IDEA - the shrink could be initiated after some delta
-            auto e = ne.node;
-            if ((i > 0 && e->neighbors.size() > Mmax) || (i == 0 && e->neighbors.size() > Mmax0))
+            auto e = R[i];
+            node->neighbors.emplace_back(e, e->distance);
+            bool insert_new = true;
+            if (e->neighbors.size() == actualMmax)
             {
-                // remove the most distant node
-                std::sort(e->neighbors.begin(), e->neighbors.end(), neighborcmp_nearest()); // TODO - do not perform sorting if already sorted
-                e->neighbors.pop_back();
+                if (!e->neighbors_sorted)
+                {
+                    std::sort(e->neighbors.begin(), e->neighbors.end(), neighborcmp_nearest());
+                    e->neighbors_sorted = true;
+                }
+#ifdef SELECT_NEIGHBORS1
+                if (e->neighbors[actualMmax - 1].distance > e->distance)
+                {
+                    e->neighbors.pop_back();
+                    e->neighbors.emplace_back(node, e->distance);
+                    std::sort(e->neighbors.begin(), e->neighbors.end(), neighborcmp_nearest()); // TODO - insert instead of sort
+                }
+#else
+                if (is_distant_node(e->neighbors, node->vector, e->distance))
+                {
+                    e->neighbors.pop_back();
+                    e->neighbors.emplace_back(node, e->distance);
+                    std::sort(e->neighbors.begin(), e->neighbors.end(), neighborcmp_nearest()); // TODO - insert instead of sort
+                }
+#endif
             }
+            else {
+                if (is_distant_node(e->neighbors, node->vector, e->distance))
+                {
+                    e->neighbors.emplace_back(node, e->distance);
+                }
+            }            
         }
+        //for (auto ne : node->neighbors)
+        //{
+        //    // IDEA - the shrink could be initiated after some delta
+        //    auto e = ne.node;
+        //    if ((i > 0 && e->neighbors.size() > Mmax) || (i == 0 && e->neighbors.size() > Mmax0))
+        //    {
+        //        // remove the most distant node
+        //        std::sort(e->neighbors.begin(), e->neighbors.end(), neighborcmp_nearest()); // TODO - do not perform sorting if already sorted
+        //        e->neighbors.pop_back();
+        //    }
+        //}
 
         // connecting the nodes in different layers
         if (prev != nullptr)
@@ -181,7 +214,7 @@ void HNSW::knn(float* q, int k, int ef)
     ep = layers[L]->enter_point;
     ep->distance = distance(ep->vector, q);
 #ifdef VISIT_HASH
-    visited.insert(ep->node_order);
+    visited.insert(ep->uniqueId);
 #else
     ep->visit_id = visit_id;
 #endif
@@ -221,9 +254,9 @@ void HNSW::search_layer(float* q, int ef)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
-            if (!visited.get(e->node_order))
+            if (!visited.get(e->uniqueId))
             { 
-                visited.insert(e->node_order);
+                visited.insert(e->uniqueId);
 #else
             if (e->visit_id < visit_id)
             {
@@ -248,6 +281,66 @@ void HNSW::search_layer(float* q, int ef)
     }
 }
 
+#ifdef SELECT_NEIGHBORS1
+
+// Algorithm 3 - the simplest algorithm select just the M most closest
+void HNSW::select_neighbors( std::vector<Node*>& R, int M, bool keepPruned)
+{
+    R.clear();
+    std::sort(W.begin(), W.end(), nodecmp_farest()); 
+    for (int i = 0; i < M && i < W.size(); i++)
+    {
+        R.push_back(W[i]);
+    }
+}
+
+#else
+
+// Algorithm 4
+void HNSW::select_neighbors(std::vector<Node*>& R, int M, bool keepPruned)
+{
+    std::vector<Node*> Wd;
+
+    Wd.reserve(M);
+    R.clear();
+    std::sort(W.begin(), W.end(), nodecmp_farest()); 
+    R.push_back(W[0]);
+    int s = 1;
+    int i = 1;
+    while(i < W.size() && s < M)
+    {
+        bool q_is_close = true;
+        for (int j = 0; j < R.size(); j++)
+        {
+            float dist = distance(W[i]->vector, R[j]->vector);
+            if (dist < W[i]->distance)
+            {
+                q_is_close = false;
+                break;
+            }
+        }
+        if (q_is_close)
+        {
+            R.push_back(W[i]);
+            s++;
+        }
+        else
+        {
+            Wd.push_back(W[i]);
+        }
+        i++;
+    }
+    if (keepPruned)
+    {
+        int Wdi = 0;
+        while (s < M && Wdi < Wd.size())
+        {
+            R.push_back(Wd[Wdi++]);
+            s++;
+        }
+    }
+}
+#endif
 
 void HNSW::printInfo()
 {
@@ -257,6 +350,7 @@ void HNSW::printInfo()
         std::cout << "Layer " << i << " " << layers[i]->node_count << "\n";
     }
 }
+
 
 
 //////////////////////////////////////////////////////////////

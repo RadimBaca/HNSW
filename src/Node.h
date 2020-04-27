@@ -41,6 +41,7 @@ public:
 
 	// runtime variables
 	float distance;
+	bool neighbors_sorted;
 #ifndef VISIT_HASH
 	int visit_id;
 #endif
@@ -55,6 +56,7 @@ public:
 		uniqueId = maxid++;
 		vector = new float[vector_size];
 		neighbors.reserve(neighbor_size);
+		neighbors_sorted = false;
 	}
 
 
@@ -66,6 +68,7 @@ public:
 		vector = new float[vector_size];
 		memcpy(vector, v, sizeof(float) * vector_size);
 		neighbors.reserve(neighbor_size);
+		neighbors_sorted = false;
 	}
 
 	Node(const Node& node) = delete;
