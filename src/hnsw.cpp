@@ -10,8 +10,13 @@ void HNSW::create(const char* filename, const char* datasetname)
         (unsigned long)(dimensions[0]) << " x " <<
         (unsigned long)(dimensions[1]) << std::endl;
     vector_count = dimensions[0];
-    vector_size = dimensions[1];
+    setVectorSize(dimensions[1]);
     float* data = new float[vector_count * vector_size];
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+    min_vector = new float[vector_size];
+    max_vector = new float[vector_size];
+    apr_q = new uint8_t[vector_size];
+#endif
 
     readData(filename, datasetname, data);
 
@@ -20,6 +25,25 @@ void HNSW::create(const char* filename, const char* datasetname)
         insert(&data[i * vector_size]);
     }
     delete[] data;
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+
+
+    for (int i = 0; i < vector_size; i++)
+    {
+        max_vector[i] = (max_vector[i] - min_vector[i]) * 1.1;
+    }
+    max_value = max_value * 1.05;
+
+#ifdef APR_DEBUG
+    std::cout << "Min\tMax\n";
+    for (int i = 0; i < vector_size; i++)
+    {
+        std::cout << min_vector[i] << "\t" << max_vector[i] << "\n";
+    }
+#endif
+
+    computeApproximateVector();
+#endif
 }
 
 
@@ -56,14 +80,29 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
     }
     std::cout << "Precision: " << positive / (dimensions_query[0] * k) << "\n";
 
-
-    auto start = std::chrono::system_clock::now();
-    for (int i = 0; i < dimensions_query[0]; i++)
+    double sum = 0;
+    double min_time;
+    for (int i = 0; i < 3; i++)
     {
-        knn(&data_query[i * dimensions_query[1]], k, ef);
+#ifdef COLLECT_STAT
+        stat.clear();
+#endif
+        auto start = std::chrono::system_clock::now();
+        for (int i = 0; i < dimensions_query[0]; i++)
+        {
+            knn(&data_query[i * dimensions_query[1]], k, ef);
+        }
+        auto end = std::chrono::system_clock::now();
+        auto time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        sum += time;
+        min_time = i == 0 ? time : std::min(min_time, time);
+        std::cout << (double)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 10000 << " [ms]; ";
     }
-    auto end = std::chrono::system_clock::now();
-    std::cout << (double)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 10000 << " [ms] \n";
+    std::cout << "avg: " << sum / 3 << " [ms]; " << "min: " << min_time << " [ms]; \n";
+#ifdef COLLECT_STAT
+    stat.print();
+#endif    
+
 }
 
 
@@ -85,6 +124,22 @@ void HNSW::insert(float* q)
 #endif
 
     visit_id++;
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+    if (visit_id == 0)
+    {
+        memcpy(min_vector, q, sizeof(float) * vector_size);
+        memcpy(max_vector, q, sizeof(float) * vector_size);
+        min_value = q[0];
+        max_value = q[0];
+    }
+    for (int i = 0; i < vector_size; i++)
+    {
+        min_vector[i] = q[i] < min_vector[i] ? q[i] : min_vector[i];
+        max_vector[i] = q[i] > max_vector[i] ? q[i] : max_vector[i];
+        min_value = std::min(min_value, q[i]);
+        max_value = std::max(max_value, q[i]);
+    }
+#endif
 
     if ((visit_id % 1000) == 0)
     {
@@ -96,6 +151,7 @@ void HNSW::insert(float* q)
     {
         ep = layers[L]->enter_point;
         ep->distance = distance(ep->vector, q);
+
 #ifdef VISIT_HASH
         visited.insert(ep->uniqueId);
 #else
@@ -110,8 +166,10 @@ void HNSW::insert(float* q)
     }
     for (int32_t i = std::min(L, l); i >= 0; i--)
     {
-        layers[i]->node_count++;
         Node* node = new Node(visit_id, vector_size, Mmax, nullptr, q);
+        layers[i]->node_count++;
+        layers[i]->nodes.push_back(node);
+
         auto actualMmax = (i == 0 ? Mmax0 : Mmax);
 #ifdef DEBUG_NET
         node->layer = i;
@@ -124,12 +182,13 @@ void HNSW::insert(float* q)
 
         // the main logic
         search_layer(q, efConstruction);
-        select_neighbors(R, M, false);
+        select_neighbors(R, M, true);
 
         for (int i = 0;i < R.size(); i++)
         {
             auto e = R[i];
             node->neighbors.emplace_back(e, e->distance);
+
             bool insert_new = true;
             if (e->neighbors.size() == actualMmax)
             {
@@ -155,23 +214,12 @@ void HNSW::insert(float* q)
 #endif
             }
             else {
-                if (is_distant_node(e->neighbors, node->vector, e->distance))
+                //if (is_distant_node(e->neighbors, node->vector, e->distance))
                 {
                     e->neighbors.emplace_back(node, e->distance);
                 }
             }            
         }
-        //for (auto ne : node->neighbors)
-        //{
-        //    // IDEA - the shrink could be initiated after some delta
-        //    auto e = ne.node;
-        //    if ((i > 0 && e->neighbors.size() > Mmax) || (i == 0 && e->neighbors.size() > Mmax0))
-        //    {
-        //        // remove the most distant node
-        //        std::sort(e->neighbors.begin(), e->neighbors.end(), neighborcmp_nearest()); // TODO - do not perform sorting if already sorted
-        //        e->neighbors.pop_back();
-        //    }
-        //}
 
         // connecting the nodes in different layers
         if (prev != nullptr)
@@ -212,7 +260,12 @@ void HNSW::knn(float* q, int k, int ef)
 #endif
     W.clear();
     ep = layers[L]->enter_point;
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+    Node::computeApproximateVector(apr_q, q, min_value, max_value, vector_size);
+    ep->apr_distance = apr_distance(ep->apr_vector, apr_q);
+#else
     ep->distance = distance(ep->vector, q);
+#endif
 #ifdef VISIT_HASH
     visited.insert(ep->uniqueId);
 #else
@@ -222,12 +275,39 @@ void HNSW::knn(float* q, int k, int ef)
 
     for (int32_t i = L; i > 0; i--)
     {
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+        apr_search_layer(apr_q, 1);
+#else
         search_layer(q, 1);
+#endif
         change_layer();
     }
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+    apr_search_layer(apr_q, ef);
+    for (int i = 0; i < ef; i++)
+    {
+        W[i]->distance = distance(q, W[i]->vector);
+    }
+    sort(W.begin(), W.end(), nodecmp_farest());
+#else
     search_layer(q, ef);
     sort(W.begin(), W.end(), nodecmp_farest());
+#endif
 }
+
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+void HNSW::computeApproximateVector()
+{
+    std::cout << "Compute approximate vectors\n";
+    for (auto& l : layers)
+    {
+        for (auto n : l->nodes)
+        {
+            n->computeApproximateVector(min_value, max_value, vector_size);
+        }
+    }
+}
+#endif
 
 
 void HNSW::search_layer(float* q, int ef)
@@ -264,6 +344,7 @@ void HNSW::search_layer(float* q, int ef)
 #endif
                 auto f = W.front();
                 e->distance = distance(e->vector, q);
+
                 if (e->distance < f->distance || W.size() < ef)
                 {
                     C.push_back(e);
@@ -276,10 +357,82 @@ void HNSW::search_layer(float* q, int ef)
                         W.pop_back();
                     }
                 }
+#ifdef COLLECT_STAT
+                else
+                {
+                    stat.distinct_computations_false++;
+                    if (e->distance == f->distance + 1) stat.distinct_computations_ended++;
+                }
+#endif
             }
         }
     }
 }
+
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+void HNSW::apr_search_layer(uint8_t* apr_q, int ef)
+{
+    std::vector<Node*> C;
+
+
+    //W.push_back(ep);
+    for (auto n : W)
+    {
+        C.push_back(n);
+    }
+    std::make_heap(W.begin(), W.end(), apr_nodecmp_farest());
+    std::make_heap(C.begin(), C.end(), apr_nodecmp_nearest());
+    while (!C.empty())
+    {
+#ifdef APR_DEBUG
+        if (C.size() > 1 && C[0]->apr_distance > C[1]->apr_distance)
+        {
+            std::cout << "HNSW::apr_search_layer - C not ordered!!\n";
+        }
+#endif
+        auto c = C.front();
+        auto f = W.front();
+        std::pop_heap(C.begin(), C.end(), apr_nodecmp_nearest());
+        C.pop_back();
+
+        if (c->apr_distance > f->apr_distance) break;
+        for (auto ne : c->neighbors)
+        {
+            auto e = ne.node;
+#ifdef VISIT_HASH
+            if (!visited.get(e->uniqueId))
+            {
+                visited.insert(e->uniqueId);
+#else
+            if (e->visit_id < visit_id)
+            {
+                e->visit_id = visit_id;
+#endif
+                auto f = W.front();
+                e->apr_distance = apr_distance(e->apr_vector, apr_q);
+//#ifdef APR_DEBUG
+//                if (visit_id == 10 && e->uniqueId == 0)
+//                {
+//                    e->print(3);
+//                }
+//#endif
+                if (e->apr_distance < f->apr_distance || W.size() < ef)
+                {
+                    C.push_back(e);
+                    std::push_heap(C.begin(), C.end(), apr_nodecmp_nearest());
+                    W.push_back(e);
+                    std::push_heap(W.begin(), W.end(), apr_nodecmp_farest());
+                    if (W.size() > ef)
+                    {
+                        std::pop_heap(W.begin(), W.end(), apr_nodecmp_farest());
+                        W.pop_back();
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
 
 #ifdef SELECT_NEIGHBORS1
 
@@ -293,6 +446,8 @@ void HNSW::select_neighbors( std::vector<Node*>& R, int M, bool keepPruned)
         R.push_back(W[i]);
     }
 }
+
+
 
 #else
 
@@ -342,12 +497,19 @@ void HNSW::select_neighbors(std::vector<Node*>& R, int M, bool keepPruned)
 }
 #endif
 
-void HNSW::printInfo()
+void HNSW::printInfo(bool all)
 {
     std::cout << "HNSW info\n";
     for (int i = 0; i < layers.size(); i++)
     {
         std::cout << "Layer " << i << " " << layers[i]->node_count << "\n";
+        if (all)
+        {
+            for (auto n : layers[i]->nodes)
+            {
+                n->print(vector_size);
+            }
+        }
     }
 }
 
