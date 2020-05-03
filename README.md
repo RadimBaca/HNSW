@@ -6,7 +6,7 @@ Malkov, Yu A., and D. A. Yashunin. "Efficient and robust approximate nearest nei
 
 # Data sets
 
-We have a number of precomputed data sets for this. All data sets are pre-split into train/test and come with ground truth data in the form of the top 100 neighbors. We store them in a HDF5 format:
+There exists a number of precomputed data sets for this problem. All data sets are pre-split into train/test and come with ground truth data in the form of the top 100 neighbors. They are in HDF5 format:
 
 | Dataset                                                           | Dimensions | Train size | Test size | Neighbors | Distance  | Download                                                                   |
 | ----------------------------------------------------------------- | ---------: | ---------: | --------: | --------: | --------- | -------------------------------------------------------------------------- |
