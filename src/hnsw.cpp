@@ -5,7 +5,7 @@ void HNSW::create(const char* filename, const char* datasetname)
 
     hsize_t dimensions[2];
 
-    getDimensions(filename, datasetname, &dimensions);
+    hdfReader::getDimensions(filename, datasetname, &dimensions);
     std::clog << "dimensions " <<
         (unsigned long)(dimensions[0]) << " x " <<
         (unsigned long)(dimensions[1]) << std::endl;
@@ -18,7 +18,7 @@ void HNSW::create(const char* filename, const char* datasetname)
     apr_q = new uint8_t[vector_size];
 #endif
 
-    readData(filename, datasetname, data);
+    hdfReader::readData(filename, datasetname, data);
 
     for (int i = 0; i < vector_count; i++)
     {
@@ -52,13 +52,13 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
     hsize_t dimensions_query[2];
     hsize_t dimensions_result[2];
 
-    getDimensions(filename, querydatasetname, &dimensions_query);
+    hdfReader::getDimensions(filename, querydatasetname, &dimensions_query);
     float* data_query = new float[dimensions_query[0] * dimensions_query[1]];
-    readData(filename, querydatasetname, data_query);
+    hdfReader::readData(filename, querydatasetname, data_query);
 
-    getDimensions(filename, resultdatasetname, &dimensions_result);
+    hdfReader::getDimensions(filename, resultdatasetname, &dimensions_result);
     int* data_result = new int[dimensions_result[0] * dimensions_result[1]];
-    readData(filename, resultdatasetname, data_result);
+    hdfReader::readData(filename, resultdatasetname, data_result);
 
     uint32_t k = 10;
     double positive = 0;
@@ -161,7 +161,8 @@ void HNSW::insert(float* q)
     }
     for (int32_t i = L; i > l; i--)
     {
-        search_layer(q, 1);
+        search_layer_one(q);
+        //search_layer(q, 1);
         change_layer();
     }
     for (int32_t i = std::min(L, l); i >= 0; i--)
@@ -237,9 +238,6 @@ void HNSW::insert(float* q)
         for (int32_t i = L + 1; i <= l; i++)
         {
             Node* node = new Node(visit_id, vector_size, Mmax, down_node, q); // TODO resolve memory leak
-#ifdef DEBUG_NET
-            node->layer = i;
-#endif
             layers.emplace_back(std::make_unique<Layer>(node));
             down_node = node;
         }
@@ -278,7 +276,7 @@ void HNSW::knn(float* q, int k, int ef)
 #ifdef COMPUTE_APPROXIMATE_VECTOR
         apr_search_layer(apr_q, 1);
 #else
-        search_layer(q, 1);
+        search_layer_one(q);
 #endif
         change_layer();
     }
@@ -309,6 +307,46 @@ void HNSW::computeApproximateVector()
 }
 #endif
 
+void HNSW::search_layer_one(float* q)
+{
+    bool change = true;
+    Node* actual;
+    while (change)
+    {
+        change = false;
+        actual = W.front();
+        for (auto ne : actual->neighbors)
+        {
+            auto e = ne.node;
+#ifdef VISIT_HASH
+            if (!visited.get(e->uniqueId))
+            {
+                visited.insert(e->uniqueId);
+#else
+            if (e->visit_id < visit_id)
+            {
+                e->visit_id = visit_id;
+#endif
+                e->distance = distance(e->vector, q);
+
+                if (e->distance < actual->distance)
+                {
+                    change = true;
+                    actual = e;
+                }
+#ifdef COLLECT_STAT
+                else
+                {
+                    stat.distinct_computations_false++;
+                    if (e->distance == actual->distance + 1) stat.distinct_computations_ended++;
+                }
+#endif
+            }
+            }
+        }
+    W.clear();
+    W.push_back(actual);
+}
 
 void HNSW::search_layer(float* q, int ef)
 {
@@ -514,62 +552,3 @@ void HNSW::printInfo(bool all)
 }
 
 
-
-//////////////////////////////////////////////////////////////
-///////////////////////   HDF5 fun    ////////////////////////
-//////////////////////////////////////////////////////////////
-
-
-void HNSW::getDimensions(const char* filename, const char* datasetname, hsize_t(*dimensions)[2])
-{
-    try
-    {
-        H5File file(filename, H5F_ACC_RDONLY);
-        DataSet dataset = file.openDataSet(datasetname);
-        DataSpace dataspace = dataset.getSpace(); // Get dataspace of the dataset.
-        int rank = dataspace.getSimpleExtentNdims(); // Get the number of dimensions in the dataspace.
-        int ndims = dataspace.getSimpleExtentDims(*dimensions, NULL);
-    }  // end of try block
-    catch (FileIException error) { error.printErrorStack();        return; }
-    catch (DataSetIException error) { error.printErrorStack();        return; }
-    catch (DataSpaceIException error) { error.printErrorStack();        return; }
-    catch (DataTypeIException error) { error.printErrorStack();        return; }
-}
-
-
-void HNSW::readData(const char* filename, const char* datasetname, float* data)
-{
-    hid_t           file, dset;           /* Handle */
-    herr_t          status;
-    /*
-    * Open file and initialize the operator data structure.
-    */
-    file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
-    dset = H5Dopen(file, datasetname, H5P_DEFAULT);
-    status = H5Dread(dset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
-
-    /*
-    * Close and release resources.
-    */
-    status = H5Dclose(dset);
-    status = H5Fclose(file);
-}
-
-
-void HNSW::readData(const char* filename, const char* datasetname, int* data)
-{
-    hid_t           file, dset;           /* Handle */
-    herr_t          status;
-    /*
-    * Open file and initialize the operator data structure.
-    */
-    file = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
-    dset = H5Dopen(file, datasetname, H5P_DEFAULT);
-    status = H5Dread(dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
-
-    /*
-    * Close and release resources.
-    */
-    status = H5Dclose(dset);
-    status = H5Fclose(file);
-}

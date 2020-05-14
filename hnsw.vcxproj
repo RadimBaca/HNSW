@@ -174,12 +174,14 @@
     <ClCompile Include="src/hnsw.cpp" />
     <ClCompile Include="src/layer.cpp" />
     <ClCompile Include="src/node.cpp" />
+    <ClCompile Include="src\hdfReader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src/hnsw.h" />
     <ClInclude Include="src/layer.h" />
     <ClInclude Include="src/node.h" />
     <ClInclude Include="src/settings.h" />
+    <ClInclude Include="src\hdfReader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

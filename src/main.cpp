@@ -1,15 +1,56 @@
 #include <chrono>
 
 #include "HNSW.h"
+#include <fstream>
 
 #define FILE_NAME       "sift-128-euclidean.hdf5"
 
 
 int main(void)
 {
- 
+#ifdef MAIN_CONVERT_HDF_TO_BIN
+    {
+        hsize_t dimensions[2];
+        hdfReader::getDimensions(FILE_NAME, "train", &dimensions);
+        float* data = new float[dimensions[0] * dimensions[1]];
+        hdfReader::readData(FILE_NAME, "train", data);
+        //for (int i = 0; i < 10; i++) std::cout << data[i] << "\n";
+        std::ofstream input("sift1M.bin", std::ios::binary);
+        //ifstream input("../../1M_d=4.bin", ios::binary);
+        input.write((char*)data, dimensions[0] * dimensions[1] * sizeof(float));
+        input.close();
+        delete[] data;
+    }
 
-#ifdef UNIT_TESTING
+    {
+        hsize_t dimensions_query[2];
+        hdfReader::getDimensions(FILE_NAME, "test", &dimensions_query);
+        float* data_query = new float[dimensions_query[0] * dimensions_query[1]];
+        std::cout << "Query set: " << dimensions_query[0] << " x " << dimensions_query[1] << "\n";
+        hdfReader::readData(FILE_NAME, "test", data_query);
+        std::ofstream qinput("siftQ1M.bin", std::ios::binary);
+        //ifstream input("../../1M_d=4.bin", ios::binary);
+        qinput.write((char*)data_query, dimensions_query[0] * dimensions_query[1] * sizeof(float));
+        qinput.close();
+        delete[] data_query;
+    }
+
+    {
+        hsize_t dimensions_result[2];
+        hdfReader::getDimensions(FILE_NAME, "neighbors", &dimensions_result);
+        int* data_result = new int[dimensions_result[0] * dimensions_result[1]];
+        std::cout << "Result set: " << dimensions_result[0] << " x " << dimensions_result[1] << "\n";
+        hdfReader::readData(FILE_NAME, "neighbors", data_result);
+        //for (int i = 0; i < 10; i++) std::cout << data_result[i] << "\n";
+        std::ofstream kinput("knnQA1M.bin", std::ios::binary);
+        //ifstream input("../../1M_d=4.bin", ios::binary);
+        kinput.write((char*)data_result, dimensions_result[0] * dimensions_result[1] * sizeof(int));
+        kinput.close();
+        delete[] data_result;
+    }
+#endif
+
+#ifdef MAIN_UNIT_TESTING
     constexpr int vcount = 1000;
     constexpr int vsize = 3;
     HNSW hnsw(4, 4, 20, 0.3);
@@ -53,7 +94,9 @@ int main(void)
         //    hnsw.W[k]->print(vsize);
         //}
     }
-#else
+#endif
+
+#ifdef MAIN_RUN_CREATE_AND_QUERY
 
     auto start = std::chrono::system_clock::now();
 

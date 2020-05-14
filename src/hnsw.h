@@ -8,15 +8,11 @@
 #include <chrono>
 #include <assert.h>
 
-#include "hdf5.h"
-#include "H5Cpp.h"
 
 #include "Node.h"
 #include "Layer.h"
 #include "settings.h"
-
-using namespace H5;
-
+#include "hdfReader.h"
 
 class linearHash
 {
@@ -170,6 +166,8 @@ public:
 	}
 
 private: 
+
+	void search_layer_one(float* q);
 	void search_layer(float* q, int ef);
 	void select_neighbors(std::vector<Node*>& R, int M, bool keepPruned);
 
@@ -266,11 +264,6 @@ private:
 		}
 	}
 
-
-	// HDF5 functions
-	void getDimensions(const char* filename, const char* datasetname, hsize_t(*dimensions)[2]);
-	void readData(const char* filename, const char* datasetname, float* data);
-	void readData(const char* filename, const char* datasetname, int* data);
 
 };
 
