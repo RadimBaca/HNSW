@@ -51,9 +51,9 @@ int main(void)
 #endif
 
 #ifdef MAIN_UNIT_TESTING
-    constexpr int vcount = 1000;
-    constexpr int vsize = 3;
-    HNSW hnsw(4, 4, 20, 0.3);
+    constexpr int vcount = 5000;
+    constexpr int vsize = 128;
+    HNSW hnsw(10, 10, 20, 0.3);
     hnsw.vector_size = vsize;
     hnsw.vector_count = vcount;
 
@@ -61,9 +61,11 @@ int main(void)
     hnsw.min_vector = new float[vsize];
     hnsw.max_vector = new float[vsize];
     hnsw.apr_q = new uint8_t[vsize];
+    hnsw.one_vector_mask_size = (vsize >> 5) == 0 ? 1 : vsize >> 5;
+    hnsw.q_delta = new int[vsize];
 #endif
 
-    float* v = new float[3];
+    float* v = new float[vsize];
     for (int i = 0; i < vcount; i++)
     {
         for (int k = 0; k < vsize; k++)
@@ -80,7 +82,8 @@ int main(void)
 #endif
     hnsw.printInfo(false);
 
-    for (int i = 0; i < 1000; i++)
+    auto start = std::chrono::system_clock::now();
+    for (int i = 0; i < 10000; i++)
     {
         //std::cout << "-------------------\n";
         for (int k = 0; k < vsize; k++)
@@ -94,13 +97,16 @@ int main(void)
         //    hnsw.W[k]->print(vsize);
         //}
     }
+    auto end = std::chrono::system_clock::now(); 
+    std::cout << (double)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000 << " [ms]";
+    hnsw.stat.print();
 #endif
 
 #ifdef MAIN_RUN_CREATE_AND_QUERY
 
     auto start = std::chrono::system_clock::now();
 
-    HNSW hnsw(16, 16, 200, 0.5);
+    HNSW hnsw(16, 20, 200, 0.5);
     hnsw.create(FILE_NAME, "train");
 
     auto end = std::chrono::system_clock::now();
