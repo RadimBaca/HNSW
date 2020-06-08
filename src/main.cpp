@@ -8,6 +8,7 @@
 
 int main(void)
 {
+
 #ifdef MAIN_CONVERT_HDF_TO_BIN
     {
         hsize_t dimensions[2];
@@ -51,19 +52,10 @@ int main(void)
 #endif
 
 #ifdef MAIN_UNIT_TESTING
-    constexpr int vcount = 5000;
+    constexpr int vcount = 10000;
     constexpr int vsize = 128;
     HNSW hnsw(10, 10, 20, 0.3);
-    hnsw.vector_size = vsize;
-    hnsw.vector_count = vcount;
-
-#ifdef COMPUTE_APPROXIMATE_VECTOR
-    hnsw.min_vector = new float[vsize];
-    hnsw.max_vector = new float[vsize];
-    hnsw.apr_q = new uint8_t[vsize];
-    hnsw.one_vector_mask_size = (vsize >> 5) == 0 ? 1 : vsize >> 5;
-    hnsw.q_delta = new int[vsize];
-#endif
+    hnsw.init(vsize, vcount);
 
     float* v = new float[vsize];
     for (int i = 0; i < vcount; i++)
@@ -71,6 +63,10 @@ int main(void)
         for (int k = 0; k < vsize; k++)
         {
             v[k] = ((float)(rand() % 10000)) / 100;
+        }
+        if (i == 789)
+        {
+            int i = 0;
         }
         hnsw.insert(v);
     }
@@ -83,7 +79,7 @@ int main(void)
     hnsw.printInfo(false);
 
     auto start = std::chrono::system_clock::now();
-    for (int i = 0; i < 10000; i++)
+    for (int i = 0; i < 20000; i++)
     {
         //std::cout << "-------------------\n";
         for (int k = 0; k < vsize; k++)
@@ -113,6 +109,7 @@ int main(void)
     double dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Insert time " << dur / 1000 << " [s] \n";
     hnsw.printInfo(false);
+    //hnsw.visited.reduce(1);
     for (int i = 40; i <= 140; i += 30)
     {
         hnsw.query(FILE_NAME, "test", "neighbors", i);

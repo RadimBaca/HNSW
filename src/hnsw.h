@@ -10,6 +10,7 @@
 #include <chrono>
 #include <assert.h>
 #include <intrin.h>
+#include <stdexcept>
 
 #include "Node.h"
 #include "Layer.h"
@@ -39,10 +40,21 @@ public:
 		hasharray = new uint32_t[actual_size];
 	}
 
+	~linearHash()
+	{
+		delete[] hasharray;
+	}
+
 	void clear()
 	{
 		item_count = 0;
 		memset(hasharray, -1, sizeof(uint32_t) * actual_size);
+	}
+
+	void reduce(int shift)
+	{
+		actual_size = actual_size >> shift;
+		mask = actual_size - 1;
 	}
 
 	void insert(uint32_t index)
@@ -116,8 +128,11 @@ public:
 		std::cout << "No. precise distance computations: " << precise_distance_computations << "\n";
 		std::cout << "No. distance computations: " << distance_computations << "\n";
 		std::cout << "No. explored node: " << explored_nodes << "\n";
-		std::cout << "No. overflows: " << overflows << "\n";
-		std::cout << "No. neighbors (avg. neighbor): " << neighbor_count << " (" << (float)neighbor_count / node_count << ")\n";
+		if (overflows > 0)
+		{
+			std::cout << "No. overflows: " << overflows << "\n";
+			std::cout << "No. neighbors (avg. neighbor): " << neighbor_count << " (" << (float)neighbor_count / node_count << ")\n";
+		}
 	}
 };
 #endif
@@ -130,6 +145,28 @@ struct CompareByFirst {
 	}
 };
 
+
+struct CompareByFirstInTuple {
+	constexpr bool operator()(std::tuple<uint32_t, uint32_t, Node*> i1, std::tuple<uint32_t, uint32_t, Node*> i2) const noexcept
+	{
+		return std::get<0>(i1) < std::get<0>(i2);
+	}
+};
+
+struct CompareByDistanceInTuple {
+	constexpr bool operator()(std::tuple<Node*, int32_t, pointer_t> i1, std::tuple<Node*, int32_t, pointer_t> i2) const noexcept
+	{
+		return std::get<1>(i1) < std::get<1>(i2);
+	}
+};
+
+struct CompareByDistanceInTupleHeap {
+	constexpr bool operator()(std::tuple<Node*, int32_t> i1, std::tuple<Node*, int32_t> i2) const noexcept
+	{
+		return std::get<1>(i1) > std::get<1>(i2);
+	}
+};
+
 class HNSW
 {
 public:
@@ -139,14 +176,17 @@ public:
 	int Mmax0;
 	int efConstruction;
 	float ml;
+	int max_node_count;
 
-	int node_count;
 	long long index_memory;
 	std::vector<std::unique_ptr<Layer>> layers;
+	float* vector_data;
+
+	int vector_data_row_size;
+	bool data_cleaned;
 
 	int visit_id;
-	std::vector<Node*> W;
-	std::priority_queue<std::pair<uint32_t, Node*>, std::vector<std::pair<uint32_t, Node*>>, CompareByFirst> WP;
+	std::vector<Neighbors> W;
 	std::unordered_map<pointer_t, uint32_t> distances;
 #ifdef VISIT_HASH
 	linearHash visited;
@@ -163,14 +203,19 @@ public:
 	uint8_t* apr_q;
 	int one_vector_mask_size;
 	int* q_delta;
+	uint8_t* apr_vector_data;
 
+	int row1_size;
+	int row2_size;
+
+	std::vector<std::tuple<Node*, int32_t, pointer_t>> apr_W;
 
 	// toto neni potreba (muze byt soucasti pocitani v distance)
 	uint8_t query_positive_avg[2]; // average distance of regions (LPQ, SPQ)
 	uint8_t query_negative_avg[2]; // average distance of regions (LNQ, SNQ)
 #endif
 
-	uint32_t vector_count;
+	//uint32_t vector_count;
 	uint32_t vector_size;
 
 
@@ -180,11 +225,22 @@ public:
 		Mmax0(Mmax*2),
 		efConstruction(efConstruction), 
 		ml(ml), 
-		node_count(0), 
-		visit_id(-1)
+		visit_id(-1),
+		max_node_count(0),
+		data_cleaned(true)
 	{ 
 	}
 
+	~HNSW()
+	{
+		if (!data_cleaned)
+		{
+			clean();
+		}
+	}
+
+	void init(uint32_t vector_size, uint32_t max_node_count);
+	void clean();
 	void create(const char* filename, const char* datasetname);
 	void query(const char* filename, const char* querydatasetname, const char* resultdatasetname, int ef);
 
@@ -192,6 +248,7 @@ public:
 	void knn(float* q, int k, int ef);
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 	void computeApproximateVector();
+	int computeSummaries(Node* node, uint32_t vector_size, int* overflows);
 #endif
 	void printInfo(bool all);
 
@@ -204,19 +261,25 @@ private:
 
 	void search_layer_one(float* q);
 	void search_layer(float* q, int ef);
-	void select_neighbors(std::vector<Node*>& R, int M, bool keepPruned, bool considerOverTreshold);
+	void select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned, bool considerOverTreshold, bool sort);
+
+	inline float* get_node_vector(pointer_t node_order) { return vector_data + node_order * vector_size; }
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 	void apr_search_layer_one(uint8_t* q);
 	void apr_search_layer(uint8_t* q, int ef);
 	void apr_search_layer_summary(uint8_t* q, int ef);
+	void apr_search_layer_double_summary(uint8_t* q, int ef);
+
+	inline uint8_t* apr_get_node_vector(pointer_t node_order) { return apr_vector_data + node_order * vector_size; }
+
 #endif
 #ifndef SELECT_NEIGHBORS1
 	inline bool is_distant_node(std::vector<Neighbors>& neighbors, float* node, float dist_from_q)
 	{
 		for (int i = 0; i < neighbors.size(); i++)
 		{
-			float dist = distance(node, neighbors[i].node->vector);
+			float dist = distance(node, get_node_vector(neighbors[i].node_order));
 			if (dist < dist_from_q)
 			{
 				return false;
@@ -241,22 +304,22 @@ private:
 		return result;
 	}
 
-	inline float distance_treshold_counting(float* q, float* node, uint32_t& no_over_treshold)
-	{
-#ifdef COLLECT_STAT
-		stat.precise_distance_computations++;
-#endif
-
-		float result = 0;
-		no_over_treshold = 0;
-		for (unsigned int i = 0; i < vector_size; i++)
-		{
-			float t = q[i] - node[i];
-			result += t * t;
-			no_over_treshold += t > DISTANCE_TRESHOLD || -t > DISTANCE_TRESHOLD;
-		}
-		return result;
-	}
+//	inline float distance_treshold_counting(float* q, float* node, uint32_t& no_over_treshold)
+//	{
+//#ifdef COLLECT_STAT
+//		stat.precise_distance_computations++;
+//#endif
+//
+//		float result = 0;
+//		no_over_treshold = 0;
+//		for (unsigned int i = 0; i < vector_size; i++)
+//		{
+//			float t = q[i] - node[i];
+//			result += t * t;
+//			no_over_treshold += t > DISTANCE_TRESHOLD || -t > DISTANCE_TRESHOLD;
+//		}
+//		return result;
+//	}
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 	inline uint32_t apr_distance(uint8_t* q, uint8_t* node)
@@ -307,19 +370,48 @@ private:
 		return result;
 	}
 
+	inline uint32_t apr_distance_summary_fixed(std::vector<int8_t>& node_summary, int node_summary_position, int* q_delta, uint32_t pivot_distance, int row_size)
+	{
+#ifdef COLLECT_STAT
+		stat.distance_computations++;
+#endif
+		uint32_t result = pivot_distance;
+		for (int i = node_summary_position; i < node_summary_position + row_size; i += 2)
+		{
+			int8_t position = node_summary[i];
+			int z = node_summary[i + 1];
+			result -= 2 * q_delta[position] * z - z * z;
+		}
 
+		return result;
+	}
+
+	void apr_change_layer()
+	{
+		for (int i = 0; i < apr_W.size(); i++)
+		{
+			auto n = apr_W[i];
+			auto node = std::get<0>(n);
+			std::get<0>(apr_W[i]) = node->lower_layer;
+			std::get<0>(apr_W[i])->copyInsertValues(*node);
+			//#ifdef VISIT_HASH
+			//			visited.insert(W[i]->uniqueId);
+			//#endif
+		}
+	}
 #endif
 
 	void change_layer()
 	{
 		for (int i = 0; i < W.size(); i++)
 		{
-			auto node = W[i];
-			W[i] = W[i]->lower_layer;
-			W[i]->copyInsertValues(*node);
-#ifdef VISIT_HASH
-			visited.insert(W[i]->uniqueId);
-#endif
+			auto n = W[i];
+			auto node = n.node;
+			W[i].node = W[i].node->lower_layer;
+			W[i].node->copyInsertValues(*node);
+//#ifdef VISIT_HASH
+//			visited.insert(W[i]->uniqueId);
+//#endif
 		}
 	}
 

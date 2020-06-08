@@ -12,12 +12,14 @@ class Layer
 public:	
 	int layer_id;
 	Node* enter_point;
+	pointer_t ep_node_order;
 	uint32_t node_count;
 	std::vector<Node*> nodes;
 
-	Layer(Node* n)
+	Layer(Node* n, pointer_t n_node_order)
 	{
 		enter_point = n;
+		ep_node_order = n_node_order;
 		node_count = 1;
 		layer_id = Layer::max_layer++;
 		nodes.push_back(n);
