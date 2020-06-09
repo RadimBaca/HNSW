@@ -11,11 +11,15 @@
 #include <assert.h>
 #include <intrin.h>
 #include <stdexcept>
+#include <algorithm>
 
 #include "Node.h"
 #include "Layer.h"
 #include "settings.h"
+
+#ifdef MAIN_RUN_CREATE_AND_QUERY
 #include "hdfReader.h"
+#endif
 
 /*
 Naive implementation of linear hash array.
@@ -147,7 +151,7 @@ struct CompareByFirst {
 
 
 struct CompareByFirstInTuple {
-	constexpr bool operator()(std::tuple<uint32_t, uint32_t, Node*> i1, std::tuple<uint32_t, uint32_t, Node*> i2) const noexcept
+	constexpr bool operator()(std::tuple<uint32_t, uint32_t, Node*, pointer_t> i1, std::tuple<uint32_t, uint32_t, Node*, pointer_t> i2) const noexcept
 	{
 		return std::get<0>(i1) < std::get<0>(i2);
 	}
@@ -159,6 +163,7 @@ struct CompareByDistanceInTuple {
 		return std::get<1>(i1) < std::get<1>(i2);
 	}
 };
+
 
 struct CompareByDistanceInTupleHeap {
 	constexpr bool operator()(std::tuple<Node*, int32_t> i1, std::tuple<Node*, int32_t> i2) const noexcept
@@ -177,6 +182,7 @@ public:
 	int efConstruction;
 	float ml;
 	int max_node_count;
+	int min_M;
 
 	long long index_memory;
 	std::vector<std::unique_ptr<Layer>> layers;
@@ -227,7 +233,8 @@ public:
 		ml(ml), 
 		visit_id(-1),
 		max_node_count(0),
-		data_cleaned(true)
+		data_cleaned(true),
+		min_M(M / 2)
 	{ 
 	}
 
@@ -241,14 +248,18 @@ public:
 
 	void init(uint32_t vector_size, uint32_t max_node_count);
 	void clean();
+
+
+#ifdef MAIN_RUN_CREATE_AND_QUERY
 	void create(const char* filename, const char* datasetname);
 	void query(const char* filename, const char* querydatasetname, const char* resultdatasetname, int ef);
+#endif
 
 	void insert(float* q);
 	void knn(float* q, int k, int ef);
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 	void computeApproximateVector();
-	int computeSummaries(Node* node, uint32_t vector_size, int* overflows);
+	int computeSummaries(Node* node, pointer_t node_order, uint32_t vector_size, int* overflows);
 #endif
 	void printInfo(bool all);
 

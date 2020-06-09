@@ -5,6 +5,7 @@
 
 #define FILE_NAME       "sift-128-euclidean.hdf5"
 
+void sift_test();
 
 int main(void)
 {
@@ -115,6 +116,134 @@ int main(void)
         hnsw.query(FILE_NAME, "test", "neighbors", i);
     }
 #endif
+
+#ifdef MAIN_RUN_CREATE_AND_QUERY_WITHOUT_HDF5
+    sift_test();
+#endif
     return 0;
 }
 
+
+
+void sift_test() {
+    size_t node_count = 1000000;
+    size_t qsize = 10000;
+    //size_t qsize = 1000;
+    //size_t vecdim = 4;
+    size_t vecdim = 128;
+    size_t answer_size = 100;
+    uint32_t k = 10;
+
+    float* mass = new float[node_count * vecdim];
+    std::ifstream input("sift1M/sift1M.bin", std::ios::binary);
+    if (!input.is_open()) std::runtime_error("Input data file not opened!");
+    input.read((char*)mass, node_count * vecdim * sizeof(float));
+    input.close();
+
+    float* massQ = new float[qsize * vecdim];
+    //ifstream inputQ("../siftQ100k.bin", ios::binary);
+    std::ifstream inputQ("sift1M/siftQ1M.bin", std::ios::binary);
+    if (!input.is_open()) std::runtime_error("Input query file not opened!");
+    //ifstream inputQ("../../1M_d=4q.bin", ios::binary);
+    inputQ.read((char*)massQ, qsize * vecdim * sizeof(float));
+    inputQ.close();
+
+    unsigned int* massQA = new unsigned int[qsize * answer_size];
+    //ifstream inputQA("../knnQA100k.bin", ios::binary);
+    std::ifstream inputQA("sift1M/knnQA1M.bin", std::ios::binary);
+    if (!input.is_open()) std::runtime_error("Input result file not opened!");
+    inputQA.read((char*)massQA, qsize * answer_size * sizeof(int));
+    inputQA.close();
+
+
+    HNSW hnsw(16, 20, 200, 0.5);
+    hnsw.init(vecdim, node_count);
+
+
+    /////////////////////////////////////////////////////// INSERT PART
+    auto start = std::chrono::system_clock::now();
+    for (int i = 0; i < node_count; i++)
+    {
+        hnsw.insert(&mass[i * vecdim]);
+    }
+    auto end = std::chrono::system_clock::now();
+    double dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    std::cout << "Insert time " << dur / 1000 << " [s] \n";
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+    hnsw.stat.clear();
+    hnsw.computeApproximateVector();
+#ifdef COLLECT_STAT
+    hnsw.stat.print();
+#endif
+#endif
+
+    /////////////////////////////////////////////////////// QUERY PART
+    hnsw.printInfo(false);
+    //hnsw.visited.reduce(1);
+    for (int ef = 40; ef <= 140; ef += 30)
+    {
+        double positive = 0;
+        for (int i = 0; i < qsize; i++)
+        {
+            hnsw.knn(&massQ[i * vecdim], k, ef);
+
+            int c1 = 0;
+            int c2 = 0;
+            while (c2 < k)
+            {
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+                if (std::get<2>(hnsw.apr_W[c1]) == massQA[i * answer_size + c2])
+#else
+                if (hnsw.W[c1].node_order == massQA[i * answer_size + c2])
+#endif
+                {
+                    positive++;
+                    c1++;
+                }
+                c2++;
+            }
+
+            //if (i < 10)
+            //{
+            //    std::cout << "\nFinded  : ";
+            //    for (int m = 0; m < 10; m++)
+            //    {
+            //        std::cout << W[m].node_order << "(" << W[m].distance << ")  ";
+            //    }
+            //    std::cout << "\nExpected: ";
+            //    for (int m = 0; m < 10; m++)
+            //    {
+            //        std::cout << data_result[i * dimensions_result[1] + m] << "  ";
+            //    }
+            //}
+        }
+        std::cout << "Precision: " << positive / (node_count * k) << "\n";
+
+        double sum = 0;
+        double min_time;
+        for (int i = 0; i < 3; i++)
+        {
+#ifdef COLLECT_STAT
+            hnsw.stat.clear();
+#endif
+            auto start = std::chrono::system_clock::now();
+            for (int i = 0; i < qsize; i++)
+            {
+                hnsw.knn(&massQ[i * vecdim], k, ef);
+            }
+            auto end = std::chrono::system_clock::now();
+            auto time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+            sum += time;
+            min_time = i == 0 ? time : std::min(min_time, time);
+            std::cout << (double)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / node_count << " [ms]; ";
+        }
+        std::cout << "avg: " << sum / (3 * node_count) << " [ms]; " << "min: " << min_time / node_count << " [ms]; \n";
+#ifdef COLLECT_STAT
+        hnsw.stat.print();
+#endif    
+    }
+
+    delete[] mass;
+    delete[] massQ;
+    delete[] massQA;
+}

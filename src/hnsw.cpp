@@ -32,6 +32,8 @@ void HNSW::clean()
 #endif
 }
 
+
+#ifdef MAIN_RUN_CREATE_AND_QUERY
 void HNSW::create(const char* filename, const char* datasetname)
 {
 
@@ -100,7 +102,7 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
         while (c2 < k)
         {
 #ifdef COMPUTE_APPROXIMATE_VECTOR
-            if (std::get<0>(apr_W[c1])->node_order == data_result[i * dimensions_result[1] + c2])
+            if (std::get<2>(apr_W[c1]) == data_result[i * dimensions_result[1] + c2])
 #else
             if (W[c1].node_order == data_result[i * dimensions_result[1] + c2])
 #endif
@@ -151,7 +153,7 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
 #endif    
 
 }
-
+#endif
 
 //////////////////////////////////////////////////////////////
 ///////////////////////   DML op    //////////////////////////
@@ -247,9 +249,9 @@ void HNSW::insert(float* q)
 
         for (int i = 0;i < R.size(); i++)
         {
-            auto e = &R[i];
-            auto enode = e->node;
-            new_node->neighbors.emplace_back(enode, e->distance, e->node_order);
+            Neighbors &e = R[i];
+            Node* enode = e.node;
+            new_node->neighbors.emplace_back(enode, e.distance, e.node_order);
 
             bool insert_new = true;
             if (enode->neighbors.size() == actualMmax)
@@ -267,17 +269,18 @@ void HNSW::insert(float* q)
                     std::sort(e->neighbors.begin(), e->neighbors.end(), neighborcmp_nearest()); // TODO - insert instead of sort
                 }
 #else
-                if (e->distance < enode->neighbors[enode->neighbors.size() - 1].distance)
+                // if the newly inserted is too far
+                if (e.distance < enode->neighbors[enode->neighbors.size() - 1].distance)
                 {
                     Roverflow.clear();
                     Woverflow.clear();
                     int pos = 0;
-                    while (enode->neighbors[pos].distance < e->distance)
+                    while (enode->neighbors[pos].distance < e.distance)
                     {
                         Roverflow.push_back(enode->neighbors[pos]);
                         pos++;
                     }
-                    Woverflow.emplace_back(new_node, e->distance, visit_id);
+                    Woverflow.emplace_back(new_node, e.distance, visit_id);
                     while (pos < enode->neighbors.size())
                     {
                         Woverflow.emplace_back(enode->neighbors[pos]);
@@ -295,7 +298,7 @@ void HNSW::insert(float* q)
             else {
                 //if (is_distant_node(e->neighbors, node->vector, e->distance))
                 {
-                    enode->neighbors.emplace_back(new_node, e->distance, visit_id);
+                    enode->neighbors.emplace_back(new_node, e.distance, visit_id);
                 }
             }            
         }
@@ -341,7 +344,7 @@ void HNSW::knn(float* q, int k, int ef)
     apr_W.clear();
     Node::computeApproximateVector(apr_q, q, shift, vector_size);
     auto dist = apr_distance(apr_get_node_vector(layers[L]->ep_node_order), apr_q);
-    apr_W.emplace_back(ep, dist, ep->node_order);
+    apr_W.emplace_back(ep, dist, ep_node_order);
 #else
     W.clear();
     auto dist = distance(get_node_vector(ep_node_order), q);
@@ -369,9 +372,14 @@ void HNSW::knn(float* q, int k, int ef)
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 #ifdef USE_TWO_FIXED_MAX
     apr_search_layer_double_summary(apr_q, ef);
-#else
+#endif
+#ifdef USE_PLAIN_CHAR
+    apr_search_layer(apr_q, ef);
+#endif
+#ifdef USE_TRESHOLD_SUMMARY
     apr_search_layer_summary(apr_q, ef);
 #endif
+#ifndef USE_PLAIN_CHAR
     // TODO - throw runtime error if W.size() is less then ef
     for (int i = 0; i < apr_W.size(); i++)
     {
@@ -385,6 +393,7 @@ void HNSW::knn(float* q, int k, int ef)
             std::get<1>(apr_W[i]) = item->second;
         }
     }
+#endif
     sort(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
 #else
     search_layer(q, ef);
@@ -415,10 +424,10 @@ void HNSW::computeApproximateVector()
         // mask version
         if (l->layer_id == 0)
         {
+            int i = 0;
             for (auto n : l->nodes)
-            {               
-
-                index_memory += computeSummaries(n, vector_size, &stat.overflows);
+            {
+                index_memory += computeSummaries(n, i++, vector_size, &stat.overflows);
 #ifdef COLLECT_STAT
                 stat.neighbor_count += n->neighbors.size();
                 stat.node_count++;
@@ -431,7 +440,7 @@ void HNSW::computeApproximateVector()
 }
 
 
-int HNSW::computeSummaries(Node* node, uint32_t vector_size, int* overflows)
+int HNSW::computeSummaries(Node* node, pointer_t node_order, uint32_t vector_size, int* overflows)
 {
     //neighbors_all = new uint8_t[neighbors.size() * vector_size];
     //int i = 0;
@@ -443,20 +452,24 @@ int HNSW::computeSummaries(Node* node, uint32_t vector_size, int* overflows)
 
 #ifdef USE_TWO_FIXED_MAX
     std::priority_queue<std::pair<int, uint8_t>, std::vector<std::pair<int, uint8_t>>, CompareByDelta> delta;
-
+    std::vector<Neighbors> &neighbors = node->neighbors;
+    std::vector<int8_t>& summary = node->summary;
     int row1_size = (int)(VECTOR_FRAGMENT1 * vector_size) * 2;
     int row2_size = (int)(VECTOR_FRAGMENT2 * vector_size) * 2;
     int byte_size = (row1_size + row2_size) * neighbors.size();
     int first_block = row1_size * neighbors.size();
+    auto pivot = apr_get_node_vector(node_order);
+
     summary.resize(byte_size);
-    int node_order = 0;
+    int neighbor_order = 0;
     for (auto ng : neighbors)
     {
         auto n = ng.node;
+        auto n_apr_vector = apr_get_node_vector(ng.node_order);
         uint8_t over_treshold = 0;
         for (int i = 0; i < vector_size; i++)
         {
-            int diff = n->apr_vector[i] - pivot[i];
+            int diff = n_apr_vector[i] - pivot[i];
 
             //if (diff > DISTANCE_TRESHOLD)
             if (diff >= 0)
@@ -486,9 +499,9 @@ int HNSW::computeSummaries(Node* node, uint32_t vector_size, int* overflows)
         {
             auto item = delta.top();
             delta.pop();
-            summary[node_order * row1_size + i] = item.second;
-            int8_t diff = n->apr_vector[item.second] - pivot[item.second];
-            summary[node_order * row1_size + i + 1] = diff;
+            summary[neighbor_order * row1_size + i] = item.second;
+            int8_t diff = n_apr_vector[item.second] - pivot[item.second];
+            summary[neighbor_order * row1_size + i + 1] = diff;
             i += 2;
         }
 
@@ -497,9 +510,9 @@ int HNSW::computeSummaries(Node* node, uint32_t vector_size, int* overflows)
         {
             auto item = delta.top();
             delta.pop();
-            summary[first_block + node_order * row2_size + i] = item.second;
-            int8_t diff = n->apr_vector[item.second] - pivot[item.second];
-            summary[first_block + node_order * row2_size + i + 1] = diff;
+            summary[first_block + neighbor_order * row2_size + i] = item.second;
+            int8_t diff = n_apr_vector[item.second] - pivot[item.second];
+            summary[first_block + neighbor_order * row2_size + i + 1] = diff;
             i += 2;
         }
 
@@ -507,12 +520,12 @@ int HNSW::computeSummaries(Node* node, uint32_t vector_size, int* overflows)
         {
             delta.pop();
         }
-        node_order++;
+        neighbor_order++;
     }
     return byte_size;
 #else
     int neighbor_array_size = 0;
-    auto pivot = apr_get_node_vector(node->node_order);
+    auto pivot = apr_get_node_vector(node_order);
     auto &summary = node->summary;
     for (auto ng : node->neighbors)
     {
@@ -728,75 +741,83 @@ void HNSW::apr_search_layer_one(uint8_t* q)
     apr_W.emplace_back(actual, actual_dist, actual_node_order);
 }
 
-//
-//void HNSW::apr_search_layer(uint8_t* apr_q, int ef)
-//{
-//    std::vector<Node*> C;
-//
-//    //W.push_back(ep);
-//    for (auto n : apr_W)
-//    {
-//        C.push_back(std::get<0>(n));
-//    }
-//    std::make_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
-//    std::make_heap(C.begin(), C.end(), apr_nodecmp_nearest());
-//    while (!C.empty())
-//    {
-//#ifdef APR_DEBUG
-//        if (C.size() > 1 && C[0]->apr_distance > C[1]->apr_distance)
-//        {
-//            std::cout << "HNSW::apr_search_layer - C not ordered!!\n";
-//        }
-//#endif
-//        auto c = C.front();
-//        auto f = std::get<1>(apr_W.front());
-//        std::pop_heap(C.begin(), C.end(), apr_nodecmp_nearest());
-//        C.pop_back();
-//
-//        if (c->apr_distance > f) break;
-//        for (auto ne : c->neighbors)
-//        {
-//            auto e = ne.node;
-//#ifdef VISIT_HASH
-//            if (!visited.get(e->node_order))
-//            {
-//                visited.insert(e->node_order);
-//#else
-//            if (e->visit_id < visit_id)
-//            {
-//                e->visit_id = visit_id;
-//#endif
-//                auto dist = e->apr_distance = apr_distance(e->apr_vector, apr_q);
-//               
-//                if (e->apr_distance < f || apr_W.size() < ef)
-//                {
-//                    C.push_back(e);
-//                    std::push_heap(C.begin(), C.end(), apr_nodecmp_nearest());
-//                    apr_W.emplace_back(e, dist, e->node_order);
-//                    std::push_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
-//                    if (apr_W.size() > ef)
-//                    {
-//                        std::pop_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
-//                        apr_W.pop_back();
-//                    }
-//                    f = std::get<1>(apr_W.front());
-//                }
-//            }
-//        }
-//    }
-//}
+
+void HNSW::apr_search_layer(uint8_t* apr_q, int ef)
+{
+    std::vector<std::tuple<Node*, int32_t>> C;
+
+    //apr_W.push_back(ep);
+    for (auto n : apr_W)
+    {
+        C.emplace_back(std::get<0>(n), std::get<1>(n));
+#ifdef VISIT_HASH
+        visited.insert(std::get<2>(n));
+#else
+        n->visit_id = visit_id;
+
+#endif
+    }
+    std::make_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
+    std::make_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
+    auto f = std::get<1>(apr_W.front());
+    while (!C.empty())
+    {
+        auto c = C.front();
+        std::pop_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
+        C.pop_back();
+
+        if (std::get<1>(c) > f) break;
+        for (auto ne : std::get<0>(c)->neighbors)
+        {
+            auto e = ne.node;
+#ifdef VISIT_HASH
+            if (!visited.get(ne.node_order))
+            {
+                visited.insert(ne.node_order);
+#else
+            if (e->visit_id < visit_id)
+            {
+                e->visit_id = visit_id;
+
+#endif
+                auto dist = apr_distance(apr_q, apr_get_node_vector(ne.node_order));
+
+                if (dist < f || apr_W.size() < ef)
+                {
+                    C.emplace_back(e, dist);
+                    std::push_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
+                    apr_W.emplace_back(e, dist, ne.node_order);
+                    std::push_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
+                    if (apr_W.size() > ef)
+                    {
+                        std::pop_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
+                        apr_W.pop_back();
+                    }
+                    f = std::get<1>(apr_W.front());
+                }
+#ifdef COLLECT_STAT
+                else
+                {
+                    stat.distance_computations_false++;
+                }
+#endif
+            }
+        }
+    }
+}
 
 
 void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
 {
-    std::priority_queue<std::pair<int32_t, Node*>, std::vector<std::pair<int32_t, Node*>>, CompareByFirst> C;
+    std::vector<std::tuple<Node*, int32_t, pointer_t>> C;
 
     distances.clear();
     //W.push_back(ep);
     for (auto n : apr_W)
     {
-        C.emplace(-std::get<1>(n), std::get<0>(n));
+        C.emplace_back(std::get<0>(n), -std::get<1>(n), std::get<2>(n));
     }
+    std::make_heap(C.begin(), C.end(), CompareByDistanceInTuple());
     auto f = std::get<1>(apr_W.front());
 #ifdef VISIT_HASH
     visited.insert(std::get<2>(apr_W.front()));
@@ -806,16 +827,17 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
 
     while (!C.empty())
     {
-        auto c = C.top();
-        C.pop();
-        Node* nc = c.second;
+        auto c = C.front();
+        std::pop_heap(C.begin(), C.end(), CompareByDistanceInTuple());
+        C.pop_back();
+        Node* nc = std::get<0>(c);
 
-        if (-c.first > f) break;
+        if (-std::get<1>(c) > f) break;
 #ifdef COLLECT_STAT
         stat.explored_nodes++;
 #endif
-        uint32_t c_distance = apr_distance(apr_q, apr_get_node_vector(nc->node_order), q_delta);
-        distances[nc->node_order] = c_distance;
+        uint32_t c_distance = apr_distance(apr_q, apr_get_node_vector(std::get<2>(c)), q_delta);
+        distances[std::get<2>(c)] = c_distance;
         int node_summary_position = 0;
         for (auto ne : nc->neighbors)
         {
@@ -834,7 +856,8 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
 
                 if (distance < f || apr_W.size() < ef)
                 {
-                    C.emplace(-distance, e);
+                    C.emplace_back(e, -distance, ne.node_order);
+                    std::push_heap(C.begin(), C.end(), CompareByDistanceInTuple());
                     apr_W.emplace_back(e, distance, ne.node_order);
                     std::push_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
                     if (apr_W.size() > ef)
@@ -853,9 +876,116 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
     }
 }
 
+
+void HNSW::apr_search_layer_double_summary(uint8_t* apr_q, int ef)
+{
+    std::vector<std::tuple<Node*, int32_t, pointer_t>> C;
+    std::vector<std::tuple<int32_t, int32_t, Node*, pointer_t >> W1;
+
+    distances.clear();
+    //W.push_back(ep);
+    for (auto n : apr_W)
+    {
+        C.emplace_back(std::get<0>(n), -std::get<1>(n), std::get<2>(n));
+    }
+    std::make_heap(C.begin(), C.end(), CompareByDistanceInTuple());
+    auto f = std::get<1>(apr_W.front());
+#ifdef VISIT_HASH
+    visited.insert(std::get<2>(apr_W.front()));
+#else
+    std::get<0>(apr_W.front())->visit_id = visit_id;
+#endif
+
+    while (!C.empty())
+    {
+        auto c = C.front();
+        std::pop_heap(C.begin(), C.end(), CompareByDistanceInTuple());
+        C.pop_back();
+        Node* nc = std::get<0>(c);
+
+        if (-std::get<1>(c) > f) break;
+#ifdef COLLECT_STAT
+        stat.explored_nodes++;
+#endif
+        uint32_t c_distance = apr_distance(apr_q, apr_get_node_vector(std::get<2>(c)), q_delta);
+        distances[std::get<2>(c)] = c_distance;
+        int node_summary_position = 0;
+        int row = 0;
+        for (auto ne : nc->neighbors)
+        {
+            auto e = ne.node;
+#ifdef VISIT_HASH
+            if (!visited.get(ne.node_order))
+            {
+                visited.insert(ne.node_order);
+#else
+            if (e->visit_id < visit_id)
+            {
+                e->visit_id = visit_id;
+#endif
+                int32_t distance = apr_distance_summary_fixed(nc->summary, node_summary_position, q_delta, c_distance, row1_size);
+                W1.emplace_back(-distance, row, e, ne.node_order);
+            }
+            node_summary_position = row1_size + node_summary_position;
+            row++;
+        }
+
+
+        if (W1.size() > 0)
+        {
+            std::make_heap(W1.begin(), W1.end(), CompareByFirstInTuple());
+            int block1_size = row1_size * nc->neighbors.size();
+            int node_counter = W1.size() < 6 ? std::min((int)(W1.size() - 1), 3) : W1.size() / 2;
+            while (node_counter >= 0)
+            {
+                auto n = W1.front();
+                int32_t distance = apr_distance_summary_fixed(nc->summary, block1_size + std::get<1>(n) * row2_size, q_delta, -std::get<0>(n), row2_size);
+
+
+                if (distance < f || apr_W.size() < ef)
+                {
+                    C.emplace_back(std::get<2>(n), -distance, std::get<3>(n));
+                    std::push_heap(C.begin(), C.end(), CompareByDistanceInTuple());
+                    apr_W.emplace_back(std::get<2>(n), distance, std::get<3>(n));
+                    std::push_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
+                    if (apr_W.size() > ef)
+                    {
+                        std::pop_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
+                        apr_W.pop_back();
+                    }
+                    f = std::get<1>(apr_W.front());
+                }
+
+                std::pop_heap(W1.begin(), W1.end(), CompareByFirstInTuple());
+                W1.pop_back();
+                node_counter--;
+            }
+            W1.clear();
+
+
+            //    int32_t distance = apr_distance_summary(nc->summary, node_summary_position, q_delta, c_distance);
+            //    if (distance < f || apr_W.size() < ef)
+            //    {
+            //        C.emplace_back(e, -distance, ne.node_order);
+            //        std::push_heap(C.begin(), C.end(), CompareByDistanceInTuple());
+            //        apr_W.emplace_back(e, distance, ne.node_order);
+            //        std::push_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
+            //        if (apr_W.size() > ef)
+            //        {
+            //            std::pop_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
+            //            apr_W.pop_back();
+            //        }
+            //        f = std::get<1>(apr_W.front());
+            //    }
+            //}
+            //else
+            //{
+            //    node_summary_position = nc->summary[node_summary_position] * 2 + 1 + node_summary_position;
+            //}
+        }
+    }
+
 //
-//void HNSW::apr_search_layer_double_summary(uint8_t* apr_q, int ef)
-//{
 //    std::priority_queue<std::pair<int32_t, Node*>, std::vector<std::pair<int32_t, Node*>>, CompareByFirst> C;
 //    std::vector<std::tuple<int32_t, int32_t, Node*>> W1;
 //
@@ -908,42 +1038,42 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
 //            node_summary_position = row1_size + node_summary_position;            
 //            row++;
 //        }
-//
-//        if (W1.size() > 0)
-//        {
-//            std::make_heap(W1.begin(), W1.end(), CompareByFirstInTuple());
-//            int block1_size = row1_size * nc->neighbors.size();
-//            int node_counter = W1.size() < 4 ? W1.size() : W1.size() / 2;
-//            while (node_counter >= 0)
-//            {
-//                auto n = W1.front();
-//                int32_t distance = apr_distance_summary_fixed(nc->summary, block1_size + std::get<1>(n) * row2_size, q_delta, -std::get<0>(n), row2_size);
-//
-//                if (distance < f || WP.size() < ef)
-//                {
-//                    C.emplace(-distance, std::get<2>(n));
-//                    WP.emplace(distance, std::get<2>(n));
-//                    if (WP.size() > ef)
-//                    {
-//                        WP.pop();
-//                    }
-//                    f = WP.top().first;
-//                }
-//
-//                std::pop_heap(W1.begin(), W1.end(), CompareByFirstInTuple());
-//                W1.pop_back();
-//                node_counter--;
-//            }
-//            W1.clear();
-//        }
-//    }
-//
-//    while (!WP.empty())
-//    {
-//        W.push_back(WP.top().second);
-//        WP.pop();
-//    }
-//}
+
+ /*       if (W1.size() > 0)
+        {
+            std::make_heap(W1.begin(), W1.end(), CompareByFirstInTuple());
+            int block1_size = row1_size * nc->neighbors.size();
+            int node_counter = W1.size() < 4 ? W1.size() : W1.size() / 2;
+            while (node_counter >= 0)
+            {
+                auto n = W1.front();
+                int32_t distance = apr_distance_summary_fixed(nc->summary, block1_size + std::get<1>(n) * row2_size, q_delta, -std::get<0>(n), row2_size);
+
+                if (distance < f || WP.size() < ef)
+                {
+                    C.emplace(-distance, std::get<2>(n));
+                    WP.emplace(distance, std::get<2>(n));
+                    if (WP.size() > ef)
+                    {
+                        WP.pop();
+                    }
+                    f = WP.top().first;
+                }
+
+                std::pop_heap(W1.begin(), W1.end(), CompareByFirstInTuple());
+                W1.pop_back();
+                node_counter--;
+            }
+            W1.clear();
+        }
+    }
+
+    while (!WP.empty())
+    {
+        W.push_back(WP.top().second);
+        WP.pop();
+    }*/
+}
 
 #endif
 
