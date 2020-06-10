@@ -1,4 +1,4 @@
-#include "HNSW.h"
+#include "hnsw.h"
 
 void HNSW::init(uint32_t vector_size, uint32_t p_max_node_count)
 {
@@ -200,7 +200,7 @@ void HNSW::insert(float* q)
     }
 #endif
 
-    if ((visit_id % 1000) == 0)
+    if ((visit_id % 10000) == 0)
     {
         std::cout << visit_id << "\n";
     }
@@ -623,6 +623,12 @@ void HNSW::search_layer_one(float* q)
     W.clear();
     W.emplace_back(actual, actual_dist, actual_node_order);
 }
+
+
+
+//////////////////////////////////////////////////////////////
+////////////////////   Search Layer    ///////////////////////
+//////////////////////////////////////////////////////////////
 
 void HNSW::search_layer(float* q, int ef)
 {
@@ -1181,6 +1187,50 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
     //}
 }
 #endif
+
+
+//////////////////////////////////////////////////////////////
+////////////////////   Serialization    ///////////////////////
+//////////////////////////////////////////////////////////////
+
+void HNSW::saveKNNG(const char* filename)
+{
+    std::ofstream f(filename, std::ios::binary);
+    if (!f.is_open())
+    {
+        std::cout << "Save file " << filename << "was not sucesfully opened\n";
+        return;
+    }
+
+    f.write(reinterpret_cast<const char *>(&max_node_count), sizeof(max_node_count));
+    f.write(reinterpret_cast<const char *>(&vector_size), sizeof(vector_size));
+    f.write(reinterpret_cast<const char *>(vector_data), sizeof(float) * max_node_count * vector_size);
+    f.close();
+}
+
+
+
+void HNSW::loadKNNG(const char* filename)
+{
+    std::ifstream f(filename, std::ios::binary);
+    if (!f.is_open())
+    {
+        std::cout << "Save file " << filename << "was not sucesfully opened\n";
+        return;
+    }
+
+    f.read(reinterpret_cast<char *>(&max_node_count), sizeof(max_node_count));
+    f.read(reinterpret_cast<char *>(&vector_size), sizeof(vector_size));
+    init(vector_size, max_node_count);
+    f.read(reinterpret_cast<char *>(vector_data), sizeof(float) * max_node_count * vector_size);
+    f.close();
+}
+
+
+//////////////////////////////////////////////////////////////
+////////////////////     Rest      ///////////////////////////
+//////////////////////////////////////////////////////////////
+
 
 void HNSW::printInfo(bool all)
 {

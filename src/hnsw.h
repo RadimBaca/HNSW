@@ -9,9 +9,12 @@
 #include <cmath>
 #include <chrono>
 #include <assert.h>
-#include <intrin.h>
+//#include <intrin.h>
 #include <stdexcept>
 #include <algorithm>
+#include <cstring>
+#include <memory>
+#include <fstream>
 
 #include "Node.h"
 #include "Layer.h"
@@ -131,7 +134,7 @@ public:
 	{
 		std::cout << "No. precise distance computations: " << precise_distance_computations << "\n";
 		std::cout << "No. distance computations: " << distance_computations << "\n";
-		std::cout << "No. explored node: " << explored_nodes << "\n";
+		std::cout << "No. explored nodes: " << explored_nodes << "\n";
 		if (overflows > 0)
 		{
 			std::cout << "No. overflows: " << overflows << "\n";
@@ -263,12 +266,9 @@ public:
 #endif
 	void printInfo(bool all);
 
-	void setVectorSize(uint32_t vsize)
-	{
-		vector_size = vsize;
-	}
-
-private: 
+    void saveKNNG(const char* filename);
+    void loadKNNG(const char* filename);
+private:
 
 	void search_layer_one(float* q);
 	void search_layer(float* q, int ef);
@@ -427,5 +427,9 @@ private:
 	}
 
 
+    void setVectorSize(uint32_t vsize)
+    {
+        vector_size = vsize;
+    }
 };
 

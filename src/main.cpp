@@ -1,6 +1,6 @@
 #include <chrono>
 
-#include "HNSW.h"
+#include "hnsw.h"
 #include <fstream>
 
 #define FILE_NAME       "sift-128-euclidean.hdf5"
@@ -182,7 +182,7 @@ void sift_test() {
     //hnsw.visited.reduce(1);
     for (int ef = 40; ef <= 140; ef += 30)
     {
-        double positive = 0;
+        float positive = 0;
         for (int i = 0; i < qsize; i++)
         {
             hnsw.knn(&massQ[i * vecdim], k, ef);
@@ -217,27 +217,27 @@ void sift_test() {
             //    }
             //}
         }
-        std::cout << "Precision: " << positive / (node_count * k) << "\n";
+        std::cout << "Precision: " << positive / (qsize * k) << "\n";
 
-        double sum = 0;
-        double min_time;
+        int sum = 0;
+        int min_time;
         for (int i = 0; i < 3; i++)
         {
 #ifdef COLLECT_STAT
             hnsw.stat.clear();
 #endif
-            auto start = std::chrono::system_clock::now();
+            auto start = std::chrono::steady_clock::now();
             for (int i = 0; i < qsize; i++)
             {
                 hnsw.knn(&massQ[i * vecdim], k, ef);
             }
-            auto end = std::chrono::system_clock::now();
-            auto time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+            auto end = std::chrono::steady_clock::now();
+            int time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
             sum += time;
             min_time = i == 0 ? time : std::min(min_time, time);
-            std::cout << (double)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / node_count << " [ms]; ";
+            std::cout << (double)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / qsize << " [us]; ";
         }
-        std::cout << "avg: " << sum / (3 * node_count) << " [ms]; " << "min: " << min_time / node_count << " [ms]; \n";
+        std::cout << "avg: " << (float)sum / (qsize * 3) << " [us]; " << "min: " << min_time / qsize<< " [us]; \n";
 #ifdef COLLECT_STAT
         hnsw.stat.print();
 #endif    
