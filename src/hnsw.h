@@ -1,4 +1,12 @@
 #pragma once
+#ifndef NO_MANUAL_VECTORIZATION
+#ifdef __SSE__
+#define USE_SSE
+#ifdef __AVX__
+#define USE_AVX
+#endif
+#endif
+#endif
 
 #include <stdio.h>
 #include <iostream>
@@ -15,6 +23,22 @@
 #include <cstring>
 #include <memory>
 #include <fstream>
+#include <xmmintrin.h>
+
+#if defined(USE_AVX) || defined(USE_SSE)
+#ifdef _MSC_VER
+#include <intrin.h>
+#include <stdexcept>
+#else
+#include <x86intrin.h>
+#endif
+
+#if defined(__GNUC__)
+#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
+#else
+#define PORTABLE_ALIGN32 __declspec(align(32))
+#endif
+#endif
 
 #include "Node.h"
 #include "Layer.h"
@@ -228,17 +252,17 @@ public:
 	uint32_t vector_size;
 
 
-	HNSW(int M, int Mmax, int efConstruction, float ml)
+	HNSW(int M, int Mmax, int efConstruction)
 		:M(M),
 		Mmax(Mmax),
 		Mmax0(Mmax*2),
-		efConstruction(efConstruction), 
-		ml(ml), 
+		efConstruction(efConstruction),
 		visit_id(-1),
 		max_node_count(0),
 		data_cleaned(true),
 		min_M(M / 2)
-	{ 
+	{
+        ml = 1 / log(1.0 * M);
 	}
 
 	~HNSW()
@@ -265,6 +289,7 @@ public:
 	int computeSummaries(Node* node, pointer_t node_order, uint32_t vector_size, int* overflows);
 #endif
 	void printInfo(bool all);
+	void print(int max_count);
 
     void saveKNNG(const char* filename);
     void loadKNNG(const char* filename);
@@ -272,7 +297,7 @@ private:
 
 	void search_layer_one(float* q);
 	void search_layer(float* q, int ef);
-	void select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned, bool considerOverTreshold, bool sort);
+	void select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned);
 
 	inline float* get_node_vector(pointer_t node_order) { return vector_data + node_order * vector_size; }
 
@@ -285,22 +310,66 @@ private:
 	inline uint8_t* apr_get_node_vector(pointer_t node_order) { return apr_vector_data + node_order * vector_size; }
 
 #endif
-#ifndef SELECT_NEIGHBORS1
-	inline bool is_distant_node(std::vector<Neighbors>& neighbors, float* node, float dist_from_q)
-	{
-		for (int i = 0; i < neighbors.size(); i++)
-		{
-			float dist = distance(node, get_node_vector(neighbors[i].node_order));
-			if (dist < dist_from_q)
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-#endif
 
-	inline float distance(float* q, float* node)
+
+
+
+#if defined(USE_SSE)
+
+    float distance(float *pVect1v, float *pVect2v) {
+        float *pVect1 = pVect1v;
+        float *pVect2 = pVect2v;
+        size_t qty = vector_size;
+        float PORTABLE_ALIGN32 TmpRes[8];
+        // size_t qty4 = qty >> 2;
+        size_t qty16 = qty >> 4;
+
+        const float *pEnd1 = pVect1 + (qty16 << 4);
+        // const float* pEnd2 = pVect1 + (qty4 << 2);
+        // const float* pEnd3 = pVect1 + qty;
+
+        __m128 diff, v1, v2;
+        __m128 sum = _mm_set1_ps(0);
+
+        while (pVect1 < pEnd1) {
+            //_mm_prefetch((char*)(pVect2 + 16), _MM_HINT_T0);
+            v1 = _mm_loadu_ps(pVect1);
+            pVect1 += 4;
+            v2 = _mm_loadu_ps(pVect2);
+            pVect2 += 4;
+            diff = _mm_sub_ps(v1, v2);
+            sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+
+            v1 = _mm_loadu_ps(pVect1);
+            pVect1 += 4;
+            v2 = _mm_loadu_ps(pVect2);
+            pVect2 += 4;
+            diff = _mm_sub_ps(v1, v2);
+            sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+
+            v1 = _mm_loadu_ps(pVect1);
+            pVect1 += 4;
+            v2 = _mm_loadu_ps(pVect2);
+            pVect2 += 4;
+            diff = _mm_sub_ps(v1, v2);
+            sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+
+            v1 = _mm_loadu_ps(pVect1);
+            pVect1 += 4;
+            v2 = _mm_loadu_ps(pVect2);
+            pVect2 += 4;
+            diff = _mm_sub_ps(v1, v2);
+            sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+        }
+        _mm_store_ps(TmpRes, sum);
+        float res = TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
+
+        return (res);
+    }
+#else
+
+
+    inline float distance(float* q, float* node)
 	{
 #ifdef COLLECT_STAT
 		stat.precise_distance_computations++;
@@ -314,6 +383,7 @@ private:
 		}
 		return result;
 	}
+#endif
 
 //	inline float distance_treshold_counting(float* q, float* node, uint32_t& no_over_treshold)
 //	{

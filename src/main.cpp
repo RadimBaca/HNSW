@@ -135,14 +135,14 @@ void sift_test() {
     uint32_t k = 10;
 
     float* mass = new float[node_count * vecdim];
-    std::ifstream input("sift1M/sift1M.bin", std::ios::binary);
+    std::ifstream input("../sift1M/sift1M.bin", std::ios::binary);
     if (!input.is_open()) std::runtime_error("Input data file not opened!");
     input.read((char*)mass, node_count * vecdim * sizeof(float));
     input.close();
 
     float* massQ = new float[qsize * vecdim];
     //ifstream inputQ("../siftQ100k.bin", ios::binary);
-    std::ifstream inputQ("sift1M/siftQ1M.bin", std::ios::binary);
+    std::ifstream inputQ("../sift1M/siftQ1M.bin", std::ios::binary);
     if (!input.is_open()) std::runtime_error("Input query file not opened!");
     //ifstream inputQ("../../1M_d=4q.bin", ios::binary);
     inputQ.read((char*)massQ, qsize * vecdim * sizeof(float));
@@ -150,27 +150,35 @@ void sift_test() {
 
     unsigned int* massQA = new unsigned int[qsize * answer_size];
     //ifstream inputQA("../knnQA100k.bin", ios::binary);
-    std::ifstream inputQA("sift1M/knnQA1M.bin", std::ios::binary);
+    std::ifstream inputQA("../sift1M/knnQA1M.bin", std::ios::binary);
     if (!input.is_open()) std::runtime_error("Input result file not opened!");
     inputQA.read((char*)massQA, qsize * answer_size * sizeof(int));
     inputQA.close();
 
 
-    HNSW hnsw(16, 20, 200, 0.5);
+    HNSW hnsw(16 , 16, 200);
     hnsw.init(vecdim, node_count);
 
 
     /////////////////////////////////////////////////////// INSERT PART
+    std::cout << "Start inserting\n";
     auto start = std::chrono::system_clock::now();
     for (int i = 0; i < node_count; i++)
     {
         hnsw.insert(&mass[i * vecdim]);
+//        if (i == 81)
+//        {
+//            hnsw.print(i + 1);
+//            //exit(0);
+//        }
     }
     auto end = std::chrono::system_clock::now();
     double dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Insert time " << dur / 1000 << " [s] \n";
 #ifdef COMPUTE_APPROXIMATE_VECTOR
+#ifdef COLLECT_STAT
     hnsw.stat.clear();
+#endif
     hnsw.computeApproximateVector();
 #ifdef COLLECT_STAT
     hnsw.stat.print();
@@ -180,47 +188,60 @@ void sift_test() {
     /////////////////////////////////////////////////////// QUERY PART
     hnsw.printInfo(false);
     //hnsw.visited.reduce(1);
-    for (int ef = 40; ef <= 140; ef += 30)
+    std::vector<std::pair<float, float>> precision_time;
+    for (int ef = 20; ef <= 200; ef += 10)
     {
+        if (ef > 100) ef += 10;
+
         float positive = 0;
         for (int i = 0; i < qsize; i++)
         {
             hnsw.knn(&massQ[i * vecdim], k, ef);
 
+            std::vector<int> result;
             int c1 = 0;
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+            for (auto item : hnsw.apr_W)
+            {
+                result.push_back(std::get<2>(item));
+#else
+            for (auto item : hnsw.W)
+            {
+                result.push_back(item.node_order);
+#endif
+
+                if (c1++ >= k) break;
+            }
+
             int c2 = 0;
             while (c2 < k)
             {
-#ifdef COMPUTE_APPROXIMATE_VECTOR
-                if (std::get<2>(hnsw.apr_W[c1]) == massQA[i * answer_size + c2])
-#else
-                if (hnsw.W[c1].node_order == massQA[i * answer_size + c2])
-#endif
+                if (std::find(result.begin(), result.end(), massQA[i * answer_size + c2]) != result.end())
                 {
                     positive++;
-                    c1++;
                 }
                 c2++;
             }
 
-            //if (i < 10)
-            //{
-            //    std::cout << "\nFinded  : ";
-            //    for (int m = 0; m < 10; m++)
-            //    {
-            //        std::cout << W[m].node_order << "(" << W[m].distance << ")  ";
-            //    }
-            //    std::cout << "\nExpected: ";
-            //    for (int m = 0; m < 10; m++)
-            //    {
-            //        std::cout << data_result[i * dimensions_result[1] + m] << "  ";
-            //    }
-            //}
+//            if (i < 10)
+//            {
+//                std::cout << "\nFinded  : ";
+//                for (int m = 0; m < 10; m++)
+//                {
+//                    std::cout << hnsw.W[m].node_order << "(" << hnsw.W[m].distance << ")  ";
+//                }
+//                std::cout << "\nExpected: ";
+//                for (int m = 0; m < 10; m++)
+//                {
+//                    std::cout << massQA[i * answer_size + m] << "  ";
+//                }
+//            }
         }
-        std::cout << "Precision: " << positive / (qsize * k) << "\n";
+        std::cout << "Precision: " << positive / (qsize * k) << ", ";
 
         int sum = 0;
         int min_time;
+        std::cout << "ef: " << ef << ", ";
         for (int i = 0; i < 3; i++)
         {
 #ifdef COLLECT_STAT
@@ -235,13 +256,22 @@ void sift_test() {
             int time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
             sum += time;
             min_time = i == 0 ? time : std::min(min_time, time);
+#ifdef COLLECT_STAT
             std::cout << (double)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / qsize << " [us]; ";
+#endif
         }
         std::cout << "avg: " << (float)sum / (qsize * 3) << " [us]; " << "min: " << min_time / qsize<< " [us]; \n";
+        precision_time.emplace_back((float)positive / (qsize * k), (float)min_time / qsize);
 #ifdef COLLECT_STAT
         hnsw.stat.print();
 #endif    
     }
+    std::cout << "\nPrecision Time [us]\n";
+    for(auto item: precision_time)
+    {
+        std::cout << item.first << " " << item.second << "\n";
+    }
+
 
     delete[] mass;
     delete[] massQ;
