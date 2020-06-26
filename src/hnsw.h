@@ -138,6 +138,8 @@ public:
 	int neighbor_count;
 	int node_count;
 
+	int histogram[200];
+
 	HNSW_Stat()
 	{
 		clear();
@@ -152,6 +154,10 @@ public:
 		overflows = 0;
 		neighbor_count = 0;
 		node_count = 0;
+        for (int i = 0; i < 200; i++)
+        {
+            histogram[i] = 0;
+        }
 	}
 
 	void print()
@@ -159,12 +165,22 @@ public:
 		std::cout << "No. precise distance computations: " << precise_distance_computations << "\n";
 		std::cout << "No. distance computations: " << distance_computations << "\n";
 		std::cout << "No. explored nodes: " << explored_nodes << "\n";
-		if (overflows > 0)
-		{
-			std::cout << "No. overflows: " << overflows << "\n";
-			std::cout << "No. neighbors (avg. neighbor): " << neighbor_count << " (" << (float)neighbor_count / node_count << ")\n";
-		}
 	}
+
+	void print_tree_info()
+    {
+#ifdef COUNT_INWARD_DEGREE
+	    for (int i = 0; i < 200; i++)
+        {
+	        std::cout << i << ": " << histogram[i] << "\n";
+        }
+#endif
+        if (overflows > 0)
+        {
+            std::cout << "No. overflows: " << overflows << "\n";
+            std::cout << "No. neighbors (avg. neighbor): " << neighbor_count << " (" << (float)neighbor_count / node_count << ")\n";
+        }
+    }
 };
 #endif
 
@@ -432,6 +448,46 @@ private:
 		return result;
 	}
 
+
+//    inline uint32_t apr_distance(uint8_t* q, uint8_t* node, int* q_delta)
+//    {
+//#ifdef COLLECT_STAT
+//        stat.distance_computations++;
+//#endif
+//        uint8_t* a = q;
+//        uint8_t* b = node;
+//        int* d = q_delta;
+//        uint32_t result = 0;
+//        auto s = vector_size >> 2;
+//        for (unsigned int i = 0; i < s; i++)
+//        {
+//            int32_t t = (*a) - (*b);
+//            result += t * t;
+//            (*d) = t;
+//            a++;
+//            b++;
+//            d++;
+//            t = (*a) - (*b);
+//            result += t * t;
+//            (*d) = t;
+//            a++;
+//            b++;
+//            d++;
+//            t = (*a) - (*b);
+//            result += t * t;
+//            (*d) = t;
+//            a++;
+//            b++;
+//            d++;
+//            t = (*a) - (*b);
+//            result += t * t;
+//            (*d) = t;
+//            a++;
+//            b++;
+//            d++;
+//        }
+//        return result;
+//    }
 
 	inline uint32_t apr_distance_summary(std::vector<int8_t>&node_summary, int& node_summary_position, int* q_delta, uint32_t pivot_distance)
 	{

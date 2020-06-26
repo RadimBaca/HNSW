@@ -25,6 +25,8 @@ public:
 		nodes.push_back(n);
 	}
 
+	Layer() {}
+
 	Layer(const Layer& layer) = delete;
 };
 

@@ -53,50 +53,89 @@ int main(void)
 #endif
 
 #ifdef MAIN_UNIT_TESTING
-    constexpr int vcount = 10000;
+    constexpr int vcount = 30;
     constexpr int vsize = 128;
-    HNSW hnsw(10, 10, 20, 0.3);
-    hnsw.init(vsize, vcount);
 
-    float* v = new float[vsize];
-    for (int i = 0; i < vcount; i++)
     {
-        for (int k = 0; k < vsize; k++)
-        {
-            v[k] = ((float)(rand() % 10000)) / 100;
+        HNSW hnsw(10, 10, 20);
+        hnsw.init(vsize, vcount);
+
+        float *v = new float[vsize];
+        for (int i = 0; i < vcount; i++) {
+            for (int k = 0; k < vsize; k++) {
+                v[k] = ((float) (rand() % 10000)) / 100;
+            }
+            hnsw.insert(v);
         }
-        if (i == 789)
-        {
-            int i = 0;
-        }
-        hnsw.insert(v);
-    }
+        hnsw.saveKNNG("test_100.bin");
+
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
-    hnsw.min_value = 0;
-    hnsw.max_value = 100;
-    hnsw.computeApproximateVector();
+        hnsw.min_value = 0;
+        hnsw.max_value = 100;
+        hnsw.computeApproximateVector();
 #endif
-    hnsw.printInfo(false);
-
-    auto start = std::chrono::system_clock::now();
-    for (int i = 0; i < 20000; i++)
-    {
-        //std::cout << "-------------------\n";
-        for (int k = 0; k < vsize; k++)
-        {
-            v[k] = ((float)(rand() % 10000)) / 100;
+        for (int k = 0; k < vsize; k++) {
+            v[k] = 50;
         }
-        hnsw.knn(v, 2, 3);
-
-        //for (int k = 0; k < 3; k++)
-        //{
-        //    hnsw.W[k]->print(vsize);
-        //}
+        hnsw.knn(v, 2, 10);
+        for (auto r : hnsw.apr_W)
+        {
+            int x = std::get<2>(r);
+            int y = std::get<1>(r);
+            std::cout << x << "(" << y << ") ";
+        }
+        std::cout << "\n";
     }
-    auto end = std::chrono::system_clock::now(); 
-    std::cout << (double)std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000 << " [ms]";
-    hnsw.stat.print();
+
+    {
+        float *v = new float[vsize];
+        HNSW hnsw(10, 10, 20);
+        hnsw.loadKNNG("test_100.bin");
+
+
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+        hnsw.min_value = 0;
+        hnsw.max_value = 100;
+        hnsw.computeApproximateVector();
+#endif
+        hnsw.printInfo(false);
+#ifdef COLLECT_STAT
+        hnsw.stat.print_tree_info();
+#endif
+
+        for (int k = 0; k < vsize; k++) {
+            v[k] = 50;
+        }
+        hnsw.knn(v, 2, 10);
+        for (auto r : hnsw.apr_W)
+        {
+            int x = std::get<2>(r);
+            int y = std::get<1>(r);
+            std::cout << x << "(" << y << ") ";
+        }
+        std::cout << "\n";
+
+        auto start = std::chrono::system_clock::now();
+        for (int i = 0; i < 100; i++) {
+            //std::cout << "-------------------\n";
+            for (int k = 0; k < vsize; k++) {
+                v[k] = ((float) (rand() % 10000)) / 100;
+            }
+            hnsw.knn(v, 2, 3);
+
+            //for (int k = 0; k < 3; k++)
+            //{
+            //    hnsw.W[k]->print(vsize);
+            //}
+        }
+        auto end = std::chrono::system_clock::now();
+        std::cout << (double) std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000
+                  << " [ms]";
+#ifdef COLLECT_STAT
+        hnsw.stat.print();
+#endif
+    }
 #endif
 
 #ifdef MAIN_RUN_CREATE_AND_QUERY
@@ -155,8 +194,10 @@ void sift_test() {
     inputQA.read((char*)massQA, qsize * answer_size * sizeof(int));
     inputQA.close();
 
-
     HNSW hnsw(16 , 16, 200);
+#ifdef LOAD_GRAPH
+    hnsw.loadKNNG("sift_1M.bin");
+#else
     hnsw.init(vecdim, node_count);
 
 
@@ -166,24 +207,23 @@ void sift_test() {
     for (int i = 0; i < node_count; i++)
     {
         hnsw.insert(&mass[i * vecdim]);
-//        if (i == 81)
-//        {
-//            hnsw.print(i + 1);
-//            //exit(0);
-//        }
     }
     auto end = std::chrono::system_clock::now();
     double dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Insert time " << dur / 1000 << " [s] \n";
+    hnsw.saveKNNG("sift_1M.bin");
+#endif
+
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 #ifdef COLLECT_STAT
     hnsw.stat.clear();
 #endif
     hnsw.computeApproximateVector();
 #ifdef COLLECT_STAT
-    hnsw.stat.print();
+    hnsw.stat.print_tree_info();
 #endif
 #endif
+
 
     /////////////////////////////////////////////////////// QUERY PART
     hnsw.printInfo(false);

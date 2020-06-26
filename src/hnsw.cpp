@@ -228,7 +228,7 @@ void HNSW::insert(float* q)
     }
     for (int32_t i = std::min(L, l); i >= 0; i--)
     {
-        Node* new_node = new Node(visit_id, vector_size, Mmax, nullptr);
+        Node* new_node = new Node(Mmax, nullptr);
         layers[i]->node_count++;
         layers[i]->nodes.push_back(new_node);
 
@@ -250,6 +250,9 @@ void HNSW::insert(float* q)
         {
             Neighbors &e = R[i];
             Node* enode = e.node;
+#ifdef COUNT_INWARD_DEGREE
+            enode->inward_count++;
+#endif
             new_node->neighbors.emplace_back(enode, e.distance, e.node_order);
 
             bool insert_new = true;
@@ -260,29 +263,33 @@ void HNSW::insert(float* q)
                     std::sort(enode->neighbors.begin(), enode->neighbors.end(), neighborcmp_nearest());
                     enode->neighbors_sorted = true;
                 }
-#ifdef SELECT_NEIGHBORS1
-                if (e->neighbors[actualMmax - 1].distance > e->distance)
-                {
-                    e->neighbors.pop_back();
-                    e->neighbors.emplace_back(node, e->distance, e->node_order);
-                    std::sort(e->neighbors.begin(), e->neighbors.end(), neighborcmp_nearest()); // TODO - insert instead of sort
-                }
-#else
+
                 Roverflow.clear();
                 Woverflow.clear();
                 Woverflow = enode->neighbors;
                 Woverflow.emplace_back(new_node, e.distance, visit_id);
                 select_neighbors(Woverflow, Roverflow, actualMmax, false);
+#ifdef COUNT_INWARD_DEGREE
+                for (auto item : enode->neighbors)
+                {
+                    item.node->inward_count--;
+                }
+#endif
                 enode->neighbors.clear();
                 for (auto r : Roverflow)
                 {
+#ifdef COUNT_INWARD_DEGREE
+                    r.node->inward_count++;
+#endif
                     enode->neighbors.emplace_back(r);
                 }
 
-#endif
             }
             else
             {
+#ifdef COUNT_INWARD_DEGREE
+                new_node->inward_count++;
+#endif
                 enode->neighbors.emplace_back(new_node, e.distance, visit_id);
             }
         }
@@ -302,7 +309,7 @@ void HNSW::insert(float* q)
         // adding layers
         for (int32_t i = L + 1; i <= l; i++)
         {
-            Node* node = new Node(visit_id, vector_size, Mmax, down_node); // TODO resolve memory leak
+            Node* node = new Node(Mmax, down_node);
             layers.emplace_back(std::make_unique<Layer>(node, visit_id));
             down_node = node;
         }
@@ -417,6 +424,11 @@ void HNSW::computeApproximateVector()
 #ifdef COLLECT_STAT
                 stat.neighbor_count += n->neighbors.size();
                 stat.node_count++;
+
+//                for (auto neig: n->neighbors)
+//                {
+//                    neig.node->inward_count++;
+//                }
 #endif
             }
         }
@@ -425,6 +437,18 @@ void HNSW::computeApproximateVector()
     std::cout << "Compute approximate values: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " [s]\n";
 #ifdef COLLECT_STAT
     stat.overflows = overflows;
+#ifdef COUNT_INWARD_DEGREE
+    for (auto n : layers[0]->nodes)
+    {
+        if (n->inward_count >= 200)
+        {
+            stat.histogram[199]++;
+        } else
+        {
+            stat.histogram[n->inward_count]++;
+        }
+    }
+#endif
 #endif
 }
 
@@ -974,11 +998,12 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
         R = W;
         return;
     }
-    int s = 1;
-    int i = 1;
+    int s = 2;
+    int i = 2;
     R.clear();
     std::sort(W.begin(), W.end(), neighborcmp_nearest());  // TODO - use heap instead of sort
     R.emplace_back(W[0]);
+    R.emplace_back(W[1]);
 
     while(i < W.size() && s < M)
     {
@@ -986,13 +1011,22 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
         for (int j = 0; j < R.size(); j++)
         {
             float dist = distance(get_node_vector(W[i].node_order), get_node_vector(R[j].node_order));
+#ifdef NSG
+            if (dist < W[i].distance && R[j].distance < W[i].distance)
+#else
             if (dist < W[i].distance)
+#endif
             {
                 q_is_close = false;
                 break;
             }
+
         }
+#ifdef COUNT_INWARD_DEGREE
+        if (q_is_close || W[i].node->inward_count <= M/4)
+#else
         if (q_is_close)
+#endif
         {
             R.emplace_back(W[i]);
             s++;
@@ -1056,35 +1090,130 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
 
 void HNSW::saveKNNG(const char* filename)
 {
-    std::ofstream f(filename, std::ios::binary);
-    if (!f.is_open())
-    {
-        std::cout << "Save file " << filename << "was not sucesfully opened\n";
-        return;
-    }
+    try {
+        std::ofstream f(filename, std::ios::binary);
 
-    f.write(reinterpret_cast<const char *>(&max_node_count), sizeof(max_node_count));
-    f.write(reinterpret_cast<const char *>(&vector_size), sizeof(vector_size));
-    f.write(reinterpret_cast<const char *>(vector_data), sizeof(float) * max_node_count * vector_size);
-    f.close();
+        if (!f.is_open())
+        {
+            std::cout << "Save file " << filename << "was not sucesfully opened\n";
+            return;
+        }
+
+        f.write(reinterpret_cast<const char *>(&max_node_count), sizeof(max_node_count));
+        f.write(reinterpret_cast<const char *>(&vector_size), sizeof(vector_size));
+        f.write(reinterpret_cast<const char *>(&visit_id), sizeof(visit_id));
+        f.write(reinterpret_cast<const char *>(vector_data), sizeof(float) * max_node_count * vector_size);
+        auto l_size = layers.size();
+        f.write(reinterpret_cast<const char *>(&l_size), sizeof(l_size));
+
+        std::unordered_map<Node*, int> node_map;
+        std::vector<Node*> node_vector;
+        for (auto& l : layers)
+        {
+            auto l_size = l->nodes.size();
+            f.write(reinterpret_cast<const char *>(&l_size), sizeof(l_size));
+            for (auto& n : l->nodes)
+            {
+                auto n_size = n->neighbors.size();
+                f.write(reinterpret_cast<const char *>(&n_size), sizeof(n_size));
+                node_map[n] = node_vector.size();
+                node_vector.emplace_back(n);
+            }
+        }
+
+        for (auto& l : layers)
+        {
+            f.write(reinterpret_cast<const char *>(&l->ep_node_order), sizeof(l->ep_node_order));
+            auto order = node_map[l->enter_point];
+            f.write(reinterpret_cast<const char *>(&order), sizeof(order));
+            for (auto& n : l->nodes)
+            {
+                order = node_map[n->lower_layer];
+                f.write(reinterpret_cast<const char *>(&order), sizeof(order));
+                auto n_size = n->neighbors.size();
+                f.write(reinterpret_cast<const char *>(&n_size), sizeof(n_size));
+                for (auto& nb : n->neighbors)
+                {
+                    order = node_map[nb.node];
+                    f.write(reinterpret_cast<const char *>(&order), sizeof(order));
+                    f.write(reinterpret_cast<const char *>(&nb.node_order), sizeof(nb.node_order));
+                }
+            }
+        }
+
+        f.close();
+    }
+    catch (std::exception e) {
+        std::cout << e.what() << "\n";
+        exit(0);
+    }
 }
 
 
 
 void HNSW::loadKNNG(const char* filename)
 {
-    std::ifstream f(filename, std::ios::binary);
-    if (!f.is_open())
-    {
-        std::cout << "Save file " << filename << "was not sucesfully opened\n";
-        return;
+    try {
+        std::ifstream f(filename, std::ios::binary);
+        if (!f.is_open()) {
+            std::cout << "Save file " << filename << "was not sucesfully opened\n";
+            return;
+        }
+
+        f.read(reinterpret_cast<char *>(&max_node_count), sizeof(max_node_count));
+        f.read(reinterpret_cast<char *>(&vector_size), sizeof(vector_size));
+        f.read(reinterpret_cast<char *>(&visit_id), sizeof(visit_id));
+        init(vector_size, max_node_count);
+        f.read(reinterpret_cast<char *>(vector_data), sizeof(float) * max_node_count * vector_size);
+        auto l_size = layers.size();
+        f.read(reinterpret_cast<char *>(&l_size), sizeof(l_size));
+
+        for (int i = 0; i < l_size; i++)
+        {
+            layers.emplace_back(std::make_unique<Layer>());
+        }
+
+        std::vector<Node *> node_vector;
+        for (auto &l : layers) {
+            std::size_t l_size;
+            f.read(reinterpret_cast<char *>(&l_size), sizeof(l_size));
+            //l->nodes.resize(l_size);
+            for (int i = 0; i < l_size; i++) {
+                std::size_t n_size;
+                f.read(reinterpret_cast<char *>(&n_size), sizeof(n_size));
+                auto new_node = new Node(n_size, nullptr);
+                node_vector.push_back(new_node);
+                l->nodes.emplace_back(new_node);
+            }
+        }
+
+
+        for (auto &l : layers) {
+            f.read(reinterpret_cast<char *>(&l->ep_node_order), sizeof(l->ep_node_order));
+            int order;
+            f.read(reinterpret_cast<char *>(&order), sizeof(order));
+            l->enter_point = node_vector[order];
+            for (auto &n : l->nodes) {
+                f.read(reinterpret_cast<char *>(&order), sizeof(order));
+                n->lower_layer = node_vector[order];
+                size_t n_size;
+                f.read(reinterpret_cast<char *>(&n_size), sizeof(n_size));
+                for (int i = 0; i < n_size; i++) {
+                    pointer_t node_order;
+                    f.read(reinterpret_cast<char *>(&order), sizeof(order));
+                    f.read(reinterpret_cast<char *>(&node_order), sizeof(node_order));
+                    n->neighbors.emplace_back(node_vector[order], 0, node_order);
+                }
+            }
+        }
+        f.close();
+
+    }
+    catch (std::exception e) {
+        std::cout << e.what() << "\n";
+        exit(0);
     }
 
-    f.read(reinterpret_cast<char *>(&max_node_count), sizeof(max_node_count));
-    f.read(reinterpret_cast<char *>(&vector_size), sizeof(vector_size));
-    init(vector_size, max_node_count);
-    f.read(reinterpret_cast<char *>(vector_data), sizeof(float) * max_node_count * vector_size);
-    f.close();
 }
 
 

@@ -71,6 +71,9 @@ public:
 	std::vector<int8_t> summary;
 #endif
 	Node* lower_layer;
+#ifdef COUNT_INWARD_DEGREE
+	int inward_count;
+#endif
 
 	// runtime variables
 	bool neighbors_sorted;
@@ -78,10 +81,13 @@ public:
 	int visit_id;
 #endif
 
-	Node(int node_order, const int vector_size, const int neighbor_size, Node* lower_layer)
+	Node(const int neighbor_size, Node* lower_layer)
 		: lower_layer(lower_layer)
 #ifndef VISIT_HASH
 		, visit_id(0)
+#endif
+#ifdef COUNT_INWARD_DEGREE
+        , inward_count(0)
 #endif
 	{
 		neighbors.reserve(neighbor_size);
