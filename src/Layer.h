@@ -27,6 +27,13 @@ public:
 
 	Layer() {}
 
+	~Layer() {
+	    for(auto& n: nodes)
+        {
+	        delete n;
+        }
+	}
+
 	Layer(const Layer& layer) = delete;
 };
 

@@ -6,7 +6,8 @@
 //#define MAIN_RUN_CREATE_AND_QUERY
 #define MAIN_RUN_CREATE_AND_QUERY_WITHOUT_HDF5
 
-#define LOAD_GRAPH
+//#define LOAD_GRAPH
+constexpr char load_file[] = "sift_1M.bin";
 
 //#define DEBUG_NET // TODO implement assert
 #define COLLECT_STAT
@@ -18,6 +19,7 @@
 //#define APR_DEBUG
 
 
+
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 
 ///////////////// Select one from these options
@@ -27,6 +29,8 @@
 
 
 constexpr uint8_t DISTANCE_TRESHOLD = 16;
+
+constexpr int EXPLORE_COUNT_TRESHOLD = 10;
 
 constexpr float VECTOR_FRAGMENT1 = 0.1;
 constexpr float VECTOR_FRAGMENT2 = 0.15;

@@ -53,11 +53,11 @@ int main(void)
 #endif
 
 #ifdef MAIN_UNIT_TESTING
-    constexpr int vcount = 30;
+    constexpr int vcount = 10000;
     constexpr int vsize = 128;
 
     {
-        HNSW hnsw(10, 10, 20);
+        HNSW hnsw(5, 5, 20);
         hnsw.init(vsize, vcount);
 
         float *v = new float[vsize];
@@ -196,9 +196,9 @@ void sift_test() {
 
     HNSW hnsw(16 , 16, 200);
 #ifdef LOAD_GRAPH
-    hnsw.loadKNNG("sift_1M.bin");
+    hnsw.loadKNNG(load_file);
 #else
-    hnsw.init(vecdim, node_count);
+    hnsw.init(vecdim, node_count );
 
 
     /////////////////////////////////////////////////////// INSERT PART
@@ -211,7 +211,7 @@ void sift_test() {
     auto end = std::chrono::system_clock::now();
     double dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Insert time " << dur / 1000 << " [s] \n";
-    hnsw.saveKNNG("sift_1M.bin");
+    hnsw.saveKNNG(load_file);
 #endif
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
@@ -227,7 +227,7 @@ void sift_test() {
 
     /////////////////////////////////////////////////////// QUERY PART
     hnsw.printInfo(false);
-    //hnsw.visited.reduce(1);
+    std::cout << "Start querying\n";
     std::vector<std::pair<float, float>> precision_time;
     for (int ef = 20; ef <= 200; ef += 10)
     {
@@ -236,7 +236,7 @@ void sift_test() {
         float positive = 0;
         for (int i = 0; i < qsize; i++)
         {
-            hnsw.knn(&massQ[i * vecdim], k, ef);
+            hnsw.aproximate_knn(&massQ[i * vecdim], k, ef);
 
             std::vector<int> result;
             int c1 = 0;
@@ -290,7 +290,7 @@ void sift_test() {
             auto start = std::chrono::steady_clock::now();
             for (int i = 0; i < qsize; i++)
             {
-                hnsw.knn(&massQ[i * vecdim], k, ef);
+                hnsw.aproximate_knn(&massQ[i * vecdim], k, ef);
             }
             auto end = std::chrono::steady_clock::now();
             int time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();

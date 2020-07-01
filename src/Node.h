@@ -34,6 +34,9 @@ struct Neighbors
 		this->node_order = uniqueID;
 	}
 
+//#define USE_SELECTED_TRESHOLD_SUMMARY
+//    bool has_summary;
+//#endif
 };
 
 struct neighborcmp_nearest {
@@ -80,6 +83,7 @@ public:
 #ifndef VISIT_HASH
 	int visit_id;
 #endif
+//	int explored_count;
 
 	Node(const int neighbor_size, Node* lower_layer)
 		: lower_layer(lower_layer)
@@ -89,6 +93,7 @@ public:
 #ifdef COUNT_INWARD_DEGREE
         , inward_count(0)
 #endif
+//        , explored_count(0)
 	{
 		neighbors.reserve(neighbor_size);
 		neighbors_sorted = false;

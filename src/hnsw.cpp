@@ -184,6 +184,24 @@ void HNSW::insert(float* q)
     visited.clear();
 #endif
 
+//      this code checks whether the new multi-level node is not close to other multi-level nodes
+//    if (visit_id > 100 && l > 0)
+//    {
+//        knn(q, Mmax0);
+//        visit_id--;
+//        bool is_multi_level_close = false;
+//        for(auto& n : W){
+//            if (n.node->pivot)
+//            {
+//                is_multi_level_close = true;
+//                break;
+//            }
+//        }
+//        if (is_multi_level_close)
+//        {
+//            l = 0;
+//        }
+//    }
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
     if (visit_id == 0)
@@ -317,7 +335,43 @@ void HNSW::insert(float* q)
 }
 
 
-void HNSW::knn(float* q, int k, int ef)
+void HNSW::knn(float* q, int ef)
+{
+    int32_t L = layers.size() - 1;
+    Node* down_node = nullptr;
+    Node* prev = nullptr;
+    Node* ep = nullptr;
+    int ep_node_order;
+    visit_id++;
+
+#ifdef VISIT_HASH
+    visited.clear();
+#endif
+    ep = layers[L]->enter_point;
+    ep_node_order = layers[L]->ep_node_order;
+    W.clear();
+    auto dist = distance(get_node_vector(ep_node_order), q);
+    W.emplace_back(ep, dist, ep_node_order);
+
+#ifdef VISIT_HASH
+    visited.insert(ep_node_order);
+#else
+    ep->visit_id = visit_id;
+#endif
+
+    for (int32_t i = L; i > 0; i--)
+    {
+        search_layer_one(q);
+        change_layer();
+    }
+#ifdef VISIT_HASH
+    visited.clear();
+#endif
+    search_layer(q, ef);
+    sort(W.begin(), W.end(), neighborcmp_nearest());
+}
+
+void HNSW::aproximate_knn(float* q, int k, int ef)
 {
     int32_t L = layers.size() - 1;
     Node* down_node = nullptr;
@@ -370,6 +424,9 @@ void HNSW::knn(float* q, int k, int ef)
 #ifdef USE_TRESHOLD_SUMMARY
     apr_search_layer_summary(apr_q, ef);
 #endif
+#ifdef USE_SELECTED_TRESHOLD_SUMMARY
+    apr_search_layer_summary(apr_q, ef);
+#endif
 #ifndef USE_PLAIN_CHAR
     // TODO - throw runtime error if W.size() is less then ef
     for (int i = 0; i < apr_W.size(); i++)
@@ -410,6 +467,29 @@ void HNSW::computeApproximateVector()
         }
     }
 
+//    clear_explored_count();
+//    float *v = new float[vector_size];
+//    uint8_t  shifted_max_value = (int)max_value >> shift;
+//    std::cout << "max value " << (int)shifted_max_value << "\n";
+//    for (int i = 0; i < 100000; i++) {
+//        //std::cout << "-------------------\n";
+//        int i1 = rand() % visit_id;
+//        int i2 = rand() % visit_id;
+//        for (int k = 0; k < vector_size; k++) {
+//            v[k] =  (get_node_vector(i1)[k] + get_node_vector(i2)[k]) / 2;
+//        }
+//        knn(v, 50);
+//    }
+//
+//    int histogram[500];
+//    for (int i = 0; i < 200; i++) histogram[i] = 0;
+//    for (auto& n: layers[0]->nodes)
+//    {
+//        if (n->explored_count < 500)
+//            histogram[n->explored_count]++;
+//    }
+//    for (int i = 0; i < 200; i++) std::cout << histogram[i] << "\n";
+
     int overflows = 0;
     for (auto& l : layers)
     {
@@ -419,8 +499,8 @@ void HNSW::computeApproximateVector()
             int i = 0;
             for (auto n : l->nodes)
             {
-
-                index_memory += computeSummaries(n, i++, vector_size, &overflows);
+                //if (n->explored_count > EXPLORE_COUNT_TRESHOLD)
+                    index_memory += computeSummaries(n, i++, vector_size, &overflows);
 #ifdef COLLECT_STAT
                 stat.neighbor_count += n->neighbors.size();
                 stat.node_count++;
@@ -666,7 +746,7 @@ void HNSW::search_layer(float* q, int ef)
         auto c = C.front();
         std::pop_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
         C.pop_back();
-
+        std::get<0>(c)->explored_count++;
         if (std::get<1>(c) > f) break;
         for (auto ne : std::get<0>(c)->neighbors)
         {
@@ -766,7 +846,7 @@ void HNSW::apr_search_layer(uint8_t* apr_q, int ef)
     std::vector<std::tuple<Node*, int32_t>> C;
 
     //apr_W.push_back(ep);
-    for (auto n : apr_W)
+    for (auto& n : apr_W)
     {
         C.emplace_back(std::get<0>(n), std::get<1>(n));
 #ifdef VISIT_HASH
@@ -786,7 +866,7 @@ void HNSW::apr_search_layer(uint8_t* apr_q, int ef)
         C.pop_back();
 
         if (std::get<1>(c) > f) break;
-        for (auto ne : std::get<0>(c)->neighbors)
+        for (auto& ne : std::get<0>(c)->neighbors)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
@@ -832,7 +912,7 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
 
     distances.clear();
     //W.push_back(ep);
-    for (auto n : apr_W)
+    for (auto& n : apr_W)
     {
         C.emplace_back(std::get<0>(n), -std::get<1>(n), std::get<2>(n));
     }
@@ -858,7 +938,7 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
         uint32_t c_distance = apr_distance(apr_q, apr_get_node_vector(std::get<2>(c)), q_delta);
         distances[std::get<2>(c)] = c_distance;
         int node_summary_position = 0;
-        for (auto ne : nc->neighbors)
+        for (auto& ne : nc->neighbors)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
@@ -870,8 +950,14 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
             {
                 e->visit_id = visit_id;
 #endif
+                int32_t distance;
+//                if (nc->explored_count > EXPLORE_COUNT_TRESHOLD) {
+//                    distance = apr_distance_summary(nc->summary, node_summary_position, q_delta, c_distance);
+//                } else {
+//                    distance = apr_distance(apr_q, apr_get_node_vector(ne.node_order));
+//                }
+                distance = apr_distance_summary(nc->summary, node_summary_position, q_delta, c_distance);
 
-                int32_t distance = apr_distance_summary(nc->summary, node_summary_position, q_delta, c_distance);
 
                 if (distance < f || apr_W.size() < ef)
                 {
@@ -889,7 +975,8 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
             }
             else
             {
-                node_summary_position = nc->summary[node_summary_position] * 2 + 1 + node_summary_position;
+//                if (nc->explored_count > EXPLORE_COUNT_TRESHOLD)
+                    node_summary_position = nc->summary[node_summary_position] * 2 + 1 + node_summary_position;
             }
         }
     }
@@ -903,7 +990,7 @@ void HNSW::apr_search_layer_double_summary(uint8_t* apr_q, int ef)
 
     distances.clear();
     //W.push_back(ep);
-    for (auto n : apr_W)
+    for (auto& n : apr_W)
     {
         C.emplace_back(std::get<0>(n), -std::get<1>(n), std::get<2>(n));
     }
@@ -930,7 +1017,7 @@ void HNSW::apr_search_layer_double_summary(uint8_t* apr_q, int ef)
         distances[std::get<2>(c)] = c_distance;
         int node_summary_position = 0;
         int row = 0;
-        for (auto ne : nc->neighbors)
+        for (auto& ne : nc->neighbors)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
@@ -1102,6 +1189,7 @@ void HNSW::saveKNNG(const char* filename)
         f.write(reinterpret_cast<const char *>(&max_node_count), sizeof(max_node_count));
         f.write(reinterpret_cast<const char *>(&vector_size), sizeof(vector_size));
         f.write(reinterpret_cast<const char *>(&visit_id), sizeof(visit_id));
+        f.write(reinterpret_cast<const char *>(&max_value), sizeof(max_value));
         f.write(reinterpret_cast<const char *>(vector_data), sizeof(float) * max_node_count * vector_size);
         auto l_size = layers.size();
         f.write(reinterpret_cast<const char *>(&l_size), sizeof(l_size));
@@ -1160,9 +1248,11 @@ void HNSW::loadKNNG(const char* filename)
             return;
         }
 
+        max_value = 220; // TODO write and read
         f.read(reinterpret_cast<char *>(&max_node_count), sizeof(max_node_count));
         f.read(reinterpret_cast<char *>(&vector_size), sizeof(vector_size));
         f.read(reinterpret_cast<char *>(&visit_id), sizeof(visit_id));
+        f.read(reinterpret_cast<char *>(&max_value), sizeof(max_value));
         init(vector_size, max_node_count);
         f.read(reinterpret_cast<char *>(vector_data), sizeof(float) * max_node_count * vector_size);
         auto l_size = layers.size();
@@ -1227,7 +1317,7 @@ void HNSW::printInfo(bool all)
     std::cout << "HNSW info\n";
     for (int i = 0; i < layers.size(); i++)
     {
-        std::cout << "Layer " << i << " " << layers[i]->node_count << "\n";
+        std::cout << "Layer " << i << " " << layers[i]->nodes.size() << "\n";
     }
     std::cout << "Index memory: " << index_memory / (1024 * 1024) << " [MB]\n";
     std::cout << "M: " << M << "\n";

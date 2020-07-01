@@ -278,7 +278,7 @@ public:
 		data_cleaned(true),
 		min_M(M / 2)
 	{
-        ml = 1 / log(1.0 * M);
+        ml = 1 / log(0.8 * M);
 	}
 
 	~HNSW()
@@ -299,7 +299,7 @@ public:
 #endif
 
 	void insert(float* q);
-	void knn(float* q, int k, int ef);
+	void aproximate_knn(float* q, int k, int ef);
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 	void computeApproximateVector();
 	int computeSummaries(Node* node, pointer_t node_order, uint32_t vector_size, int* overflows);
@@ -311,6 +311,7 @@ public:
     void loadKNNG(const char* filename);
 private:
 
+    void knn(float* q, int ef);
 	void search_layer_one(float* q);
 	void search_layer(float* q, int ef);
 	void select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned);
@@ -556,6 +557,14 @@ private:
     void setVectorSize(uint32_t vsize)
     {
         vector_size = vsize;
+    }
+
+    void clear_explored_count()
+    {
+	    for (auto& n: layers[0]->nodes)
+        {
+	        n->explored_count = 0;
+        }
     }
 };
 
