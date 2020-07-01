@@ -17,13 +17,12 @@
 #include <cmath>
 #include <chrono>
 #include <assert.h>
-//#include <intrin.h>
 #include <stdexcept>
 #include <algorithm>
 #include <cstring>
 #include <memory>
 #include <fstream>
-#include <xmmintrin.h>
+
 
 #if defined(USE_AVX) || defined(USE_SSE)
 #ifdef _MSC_VER
@@ -266,7 +265,7 @@ public:
 
 	//uint32_t vector_count;
 	uint32_t vector_size;
-
+	uint32_t vector_parts;      // vector_size / number of 16-bit values in vector register
 
 	HNSW(int M, int Mmax, int efConstruction)
 		:M(M),
@@ -419,11 +418,42 @@ private:
 //	}
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
-	inline uint32_t apr_distance(uint8_t* q, uint8_t* node)
+#ifdef USE_AVX
+    inline uint32_t apr_distance(uint8_t* __restrict__ q, uint8_t* __restrict__ node)
+    {
+        __m256i zero = _mm256_set1_epi64x(0); // zero = 0
+        __m256i result = zero; // result = 0
+        for (uint32_t i = 0; i < vector_parts; i++) {
+            __m128i a = _mm_loadu_si128(reinterpret_cast<const __m128i*>(q + 16 * i));     // a = q[i]
+            __m128i b = _mm_loadu_si128(reinterpret_cast<const __m128i*>(node + 16 * i));  // b = node[i]
+            __m256i ca = _mm256_cvtepu8_epi16(a);       // zero-extend 8-bit to 16-bit
+            __m256i cb = _mm256_cvtepu8_epi16(b);       // zero-extend 8-bit to 16-bit
+            auto sub = _mm256_sub_epi16(ca, cb);        // sub = a - b
+            auto pow = _mm256_mullo_epi16(sub, sub);    // pow = sub * sub
+            result = _mm256_add_epi16(result, pow);     // result += pow
+        }
+
+        auto x = _mm256_hadd_epi16(result, zero);   // first reduction pass, data is at [0:4] and [8:12]
+        auto y = _mm256_hadd_epi16(x, zero);        // second reduction pass, data is at [0:2] and [8:10]
+        uint32_t output = 0;
+        uint16_t data[4];
+        memcpy(data, reinterpret_cast<uint16_t*>(&y), sizeof(uint16_t) * 2);
+        memcpy(data + 2, reinterpret_cast<uint16_t*>(&y) + 8, sizeof(uint16_t) * 2);
+
+        for (int i = 0; i < 4; i++) {
+            output += data[i];
+        }
+
+        for (unsigned int i = vector_parts * 16; i < vector_size; i++)
+        {
+            int32_t t = q[i] - node[i];
+            output += t * t;
+        }
+        return output;
+    }
+#else
+    inline uint32_t apr_distance(uint8_t* q, uint8_t* node)
 	{
-#ifdef COLLECT_STAT
-		stat.distance_computations++;
-#endif
 		uint32_t result = 0;
 		for (unsigned int i = 0; i < vector_size; i++)
 		{
@@ -432,6 +462,7 @@ private:
 		}
 		return result;
 	}
+#endif
 
 	inline uint32_t apr_distance(uint8_t* q, uint8_t* node, int* q_delta)
 	{
@@ -556,6 +587,6 @@ private:
     void setVectorSize(uint32_t vsize)
     {
         vector_size = vsize;
+        vector_parts = vsize / 16;
     }
 };
-
