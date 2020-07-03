@@ -11,7 +11,9 @@ void csw::load_index(const char* file_name)
 {
     HNSW hnsw(16, 16, 200);
 
-    hnsw.loadKNNG(file_name);
+    hnsw.loadGraph(file_name);
     hnsw.computeApproximateVector();
+
+    int *group_assignement = new int[hnsw.actual_node_count_];
 
 }

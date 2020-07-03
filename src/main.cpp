@@ -101,7 +101,7 @@ int main(void)
 #endif
         hnsw.printInfo(false);
 #ifdef COLLECT_STAT
-        hnsw.stat.print_tree_info();
+        hnsw.stat_.print_tree_info();
 #endif
 
         for (int k = 0; k < vsize; k++) {
@@ -126,14 +126,14 @@ int main(void)
 
             //for (int k = 0; k < 3; k++)
             //{
-            //    hnsw.W[k]->print(vsize);
+            //    hnsw.W_[k]->print(vsize);
             //}
         }
         auto end = std::chrono::system_clock::now();
         std::cout << (double) std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000
                   << " [ms]";
 #ifdef COLLECT_STAT
-        hnsw.stat.print();
+        hnsw.stat_.print();
 #endif
     }
 #endif
@@ -149,7 +149,7 @@ int main(void)
     double dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Insert time " << dur / 1000 << " [s] \n";
     hnsw.printInfo(false);
-    //hnsw.visited.reduce(1);
+    //hnsw.visited_.reduce(1);
     for (int i = 40; i <= 140; i += 30)
     {
         hnsw.query(FILE_NAME, "test", "neighbors", i);
@@ -196,7 +196,7 @@ void sift_test() {
 
     HNSW hnsw(16 , 16, 200);
 #ifdef LOAD_GRAPH
-    hnsw.loadKNNG(load_file);
+    hnsw.loadGraph(load_file);
 #else
     hnsw.init(vecdim, node_count );
 
@@ -211,16 +211,16 @@ void sift_test() {
     auto end = std::chrono::system_clock::now();
     double dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Insert time " << dur / 1000 << " [s] \n";
-    hnsw.saveKNNG(load_file);
+    hnsw.saveGraph(load_file);
 #endif
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 #ifdef COLLECT_STAT
-    hnsw.stat.clear();
+    hnsw.stat_.clear();
 #endif
     hnsw.computeApproximateVector();
 #ifdef COLLECT_STAT
-    hnsw.stat.print_tree_info();
+    hnsw.stat_.print_tree_info();
 #endif
 #endif
 
@@ -236,7 +236,7 @@ void sift_test() {
         float positive = 0;
         for (int i = 0; i < qsize; i++)
         {
-            hnsw.aproximate_knn(&massQ[i * vecdim], k, ef);
+            hnsw.aproximateKnn(&massQ[i * vecdim], k, ef);
 
             std::vector<int> result;
             int c1 = 0;
@@ -245,7 +245,7 @@ void sift_test() {
             {
                 result.push_back(std::get<2>(item));
 #else
-            for (auto item : hnsw.W)
+            for (auto item : hnsw.W_)
             {
                 result.push_back(item.node_order);
 #endif
@@ -268,7 +268,7 @@ void sift_test() {
 //                std::cout << "\nFinded  : ";
 //                for (int m = 0; m < 10; m++)
 //                {
-//                    std::cout << hnsw.W[m].node_order << "(" << hnsw.W[m].distance << ")  ";
+//                    std::cout << hnsw.W_[m].node_order << "(" << hnsw.W_[m].distance << ")  ";
 //                }
 //                std::cout << "\nExpected: ";
 //                for (int m = 0; m < 10; m++)
@@ -285,12 +285,12 @@ void sift_test() {
         for (int i = 0; i < 3; i++)
         {
 #ifdef COLLECT_STAT
-            hnsw.stat.clear();
+            hnsw.stat_.clear();
 #endif
             auto start = std::chrono::steady_clock::now();
             for (int i = 0; i < qsize; i++)
             {
-                hnsw.aproximate_knn(&massQ[i * vecdim], k, ef);
+                hnsw.aproximateKnn(&massQ[i * vecdim], k, ef);
             }
             auto end = std::chrono::steady_clock::now();
             int time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -303,7 +303,7 @@ void sift_test() {
         std::cout << "avg: " << (float)sum / (qsize * 3) << " [us]; " << "min: " << min_time / qsize<< " [us]; \n";
         precision_time.emplace_back((float)positive / (qsize * k), (float)min_time / qsize);
 #ifdef COLLECT_STAT
-        hnsw.stat.print();
+        hnsw.stat_.print();
 #endif    
     }
     std::cout << "\nPrecision Time [us]\n";
