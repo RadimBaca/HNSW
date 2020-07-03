@@ -34,6 +34,9 @@ struct Neighbors
 		this->node_order = uniqueID;
 	}
 
+//#define USE_SELECTED_TRESHOLD_SUMMARY
+//    bool has_summary;
+//#endif
 };
 
 struct neighborcmp_nearest {
@@ -78,17 +81,19 @@ public:
 	// runtime variables
 	bool neighbors_sorted;
 #ifndef VISIT_HASH
-	int visit_id;
+	int actual_node_count_;
 #endif
+//	int explored_count;
 
 	Node(const int neighbor_size, Node* lower_layer)
 		: lower_layer(lower_layer)
 #ifndef VISIT_HASH
-		, visit_id(0)
+		, actual_node_count_(0)
 #endif
 #ifdef COUNT_INWARD_DEGREE
         , inward_count(0)
 #endif
+//        , explored_count(0)
 	{
 		neighbors.reserve(neighbor_size);
 		neighbors_sorted = false;
@@ -105,7 +110,7 @@ public:
 	{
 		//distance = node.distance;
 #ifndef VISIT_HASH
-		visit_id = node.visit_id;
+		actual_node_count_ = node.actual_node_count_;
 #endif
 	}
 

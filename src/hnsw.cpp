@@ -2,11 +2,10 @@
 
 void HNSW::init(uint32_t vector_size, uint32_t p_max_node_count)
 {
-    data_cleaned = false;
-    max_node_count = p_max_node_count;
+    data_cleaned_ = false;
+    max_node_count_ = p_max_node_count;
     setVectorSize(vector_size);
-    vector_data = new float[p_max_node_count * vector_size];
-    vector_data_row_size = sizeof(float) * vector_size;
+    vector_data_ = new float[p_max_node_count * vector_size];
 #ifdef COMPUTE_APPROXIMATE_VECTOR
     apr_vector_data = new uint8_t[p_max_node_count * vector_size];
     min_vector = new float[vector_size];
@@ -22,7 +21,7 @@ void HNSW::init(uint32_t vector_size, uint32_t p_max_node_count)
 
 void HNSW::clean()
 {
-    delete[] vector_data;
+    delete[] vector_data_;
 #ifdef COMPUTE_APPROXIMATE_VECTOR
     delete[] apr_vector_data;
     delete[] min_vector;
@@ -45,18 +44,18 @@ void HNSW::create(const char* filename, const char* datasetname)
         (unsigned long)(dimensions[1]) << std::endl;
  
     init(dimensions[1], dimensions[0]);
-    float* data = new float[max_node_count * vector_size];
+    float* data = new float[max_node_count_ * vector_size_];
     hdfReader::readData(filename, datasetname, data);
 
-    for (int i = 0; i < max_node_count; i++)
+    for (int i = 0; i < max_node_count_; i++)
     {
-        insert(&data[i * vector_size]);
+        insert(&data[i * vector_size_]);
     }
     delete[] data;
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 
 
-    for (int i = 0; i < vector_size; i++)
+    for (int i = 0; i < vector_size_; i++)
     {
         max_vector[i] = (max_vector[i] - min_vector[i]) * 1.1;
     }
@@ -64,16 +63,16 @@ void HNSW::create(const char* filename, const char* datasetname)
 
 #ifdef APR_DEBUG
     std::cout << "Min\tMax\n";
-    for (int i = 0; i < vector_size; i++)
+    for (int i = 0; i < vector_size_; i++)
     {
         std::cout << min_vector[i] << "\t" << max_vector[i] << "\n";
     }
 #endif
-    stat.clear();
+    stat_.clear();
     computeApproximateVector();
 #endif
 #ifdef COLLECT_STAT
-    stat.print();
+    stat_.print();
 #endif
 }
 
@@ -104,7 +103,7 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
 #ifdef COMPUTE_APPROXIMATE_VECTOR
             if (std::get<2>(apr_W[c1]) == data_result[i * dimensions_result[1] + c2])
 #else
-            if (W[c1].node_order == data_result[i * dimensions_result[1] + c2])
+            if (W_[c1].node_order == data_result[i * dimensions_result[1] + c2])
 #endif
             {
                 positive++;
@@ -118,7 +117,7 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
         //    std::cout << "\nFinded  : ";
         //    for (int m = 0; m < 10; m++)
         //    {
-        //        std::cout << W[m].node_order << "(" << W[m].distance << ")  ";
+        //        std::cout << W_[m].node_order << "(" << W_[m].distance << ")  ";
         //    }
         //    std::cout << "\nExpected: ";
         //    for (int m = 0; m < 10; m++)
@@ -134,7 +133,7 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
     for (int i = 0; i < 3; i++)
     {
 #ifdef COLLECT_STAT
-        stat.clear();
+        stat_.clear();
 #endif
         auto start = std::chrono::system_clock::now();
         for (int i = 0; i < dimensions_query[0]; i++)
@@ -151,7 +150,7 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
     }
     std::cout << "avg: " << sum / (3 * dimensions_query[0]) << " [ms]; " << "min: " << min_time / dimensions_query[0] << " [ms]; \n";
 #ifdef COLLECT_STAT
-    stat.print();
+    stat_.print();
 #endif    
 
 }
@@ -163,8 +162,8 @@ void HNSW::query(const char* filename, const char* querydatasetname, const char*
 
 void HNSW::insert(float* q)
 {
-    int32_t l = -log(((float)(rand() % 10000 + 1)) / 10000) * ml;
-    int32_t L = layers.size() - 1;
+    int32_t l = -log(((float)(rand() % 10000 + 1)) / 10000) * ml_;
+    int32_t L = layers_.size() - 1;
     Node* down_node = nullptr;
     Node* prev = nullptr;
     Node* ep = nullptr;
@@ -173,27 +172,45 @@ void HNSW::insert(float* q)
     std::vector<Neighbors> Woverflow;
     std::vector<Neighbors> Roverflow;
 
-    visit_id++;
-    if (visit_id >= max_node_count)
+    actual_node_count_++;
+    if (actual_node_count_ >= max_node_count_)
     {
         throw std::runtime_error("HNSW: exceeded maximal number of nodes\n");
     }
-    memcpy(get_node_vector(visit_id), q, sizeof(float) * vector_size);
+    memcpy(getNodeVector(actual_node_count_), q, sizeof(float) * vector_size_);
 
 #ifdef VISIT_HASH
-    visited.clear();
+    visited_.clear();
 #endif
 
+//      this code checks whether the new multi-level node is not close to other multi-level nodes
+//    if (actual_node_count_ > 100 && l > 0)
+//    {
+//        knn(q, Mmax0_);
+//        actual_node_count_--;
+//        bool is_multi_level_close = false;
+//        for(auto& n : W_){
+//            if (n.node->pivot)
+//            {
+//                is_multi_level_close = true;
+//                break;
+//            }
+//        }
+//        if (is_multi_level_close)
+//        {
+//            l = 0;
+//        }
+//    }
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
-    if (visit_id == 0)
+    if (actual_node_count_ == 0)
     {
-        memcpy(min_vector, q, sizeof(float) * vector_size);
-        memcpy(max_vector, q, sizeof(float) * vector_size);
+        memcpy(min_vector, q, sizeof(float) * vector_size_);
+        memcpy(max_vector, q, sizeof(float) * vector_size_);
         min_value = q[0];
         max_value = q[0];
     }
-    for (int i = 0; i < vector_size; i++)
+    for (int i = 0; i < vector_size_; i++)
     {
         min_vector[i] = q[i] < min_vector[i] ? q[i] : min_vector[i];
         max_vector[i] = q[i] > max_vector[i] ? q[i] : max_vector[i];
@@ -202,49 +219,49 @@ void HNSW::insert(float* q)
     }
 #endif
 
-    if ((visit_id % 10000) == 0)
+    if ((actual_node_count_ % 10000) == 0)
     {
-        std::cout << visit_id << "\n";
+        std::cout << actual_node_count_ << "\n";
     }
 
-    W.clear();
+    W_.clear();
     if (L >= 0)
     {
-        ep = layers[L]->enter_point;
-        ep_node_order = layers[L]->ep_node_order;
-        auto dist = distance(get_node_vector(ep_node_order), q);
+        ep = layers_[L]->enter_point;
+        ep_node_order = layers_[L]->ep_node_order;
+        auto dist = distance(getNodeVector(ep_node_order), q);
 
 #ifdef VISIT_HASH
-        visited.insert(ep_node_order);
+        visited_.insert(ep_node_order);
 #else
-        ep->visit_id = visit_id;
+        ep->actual_node_count_ = actual_node_count_;
 #endif
-        W.emplace_back(ep, dist, ep_node_order);
+        W_.emplace_back(ep, dist, ep_node_order);
     }
     for (int32_t i = L; i > l; i--)
     {
-        search_layer_one(q);
-        change_layer();
+        searchLayerOne(q);
+        changeLayer();
     }
     for (int32_t i = std::min(L, l); i >= 0; i--)
     {
-        Node* new_node = new Node(Mmax, nullptr);
-        layers[i]->node_count++;
-        layers[i]->nodes.push_back(new_node);
+        Node* new_node = new Node(Mmax_, nullptr);
+        layers_[i]->node_count++;
+        layers_[i]->nodes.push_back(new_node);
 
-        auto actualMmax = (i == 0 ? Mmax0 : Mmax);
+        auto actualMmax = (i == 0 ? Mmax0_ : Mmax_);
 
         if (l > L && i == L)
         {
-            down_node = new_node; // remember the top node, if we are going to add layers
+            down_node = new_node; // remember the top node, if we are going to add layers_
         }
 
         // the main logic
 #ifdef VISIT_HASH
-        visited.clear();
+        visited_.clear();
 #endif
-        search_layer(q, efConstruction);
-        select_neighbors(W, R, M, false);
+        searchLayer(q, efConstruction_);
+        selectNeighbors(W_, R, M_, false);
 
         for (int i = 0;i < R.size(); i++)
         {
@@ -267,8 +284,8 @@ void HNSW::insert(float* q)
                 Roverflow.clear();
                 Woverflow.clear();
                 Woverflow = enode->neighbors;
-                Woverflow.emplace_back(new_node, e.distance, visit_id);
-                select_neighbors(Woverflow, Roverflow, actualMmax, false);
+                Woverflow.emplace_back(new_node, e.distance, actual_node_count_);
+                selectNeighbors(Woverflow, Roverflow, actualMmax, false);
 #ifdef COUNT_INWARD_DEGREE
                 for (auto item : enode->neighbors)
                 {
@@ -290,75 +307,111 @@ void HNSW::insert(float* q)
 #ifdef COUNT_INWARD_DEGREE
                 new_node->inward_count++;
 #endif
-                enode->neighbors.emplace_back(new_node, e.distance, visit_id);
+                enode->neighbors.emplace_back(new_node, e.distance, actual_node_count_);
             }
         }
 
-        // connecting the nodes in different layers
+        // connecting the nodes in different layers_
         if (prev != nullptr)
         {
             prev->lower_layer = new_node;
         }
         prev = new_node;
 
-        // switch the actual layer (W nodes are replaced by their bottom counterparts)
-        if (i > 0) change_layer();
+        // switch the actual layer (W_ nodes are replaced by their bottom counterparts)
+        if (i > 0) changeLayer();
     }
     if (l > L)
     {
-        // adding layers
+        // adding layers_
         for (int32_t i = L + 1; i <= l; i++)
         {
-            Node* node = new Node(Mmax, down_node);
-            layers.emplace_back(std::make_unique<Layer>(node, visit_id));
+            Node* node = new Node(Mmax_, down_node);
+            layers_.emplace_back(std::make_unique<Layer>(node, actual_node_count_));
             down_node = node;
         }
     }
 }
 
 
-void HNSW::knn(float* q, int k, int ef)
+void HNSW::knn(float* q, int ef)
 {
-    int32_t L = layers.size() - 1;
+    int32_t L = layers_.size() - 1;
     Node* down_node = nullptr;
     Node* prev = nullptr;
     Node* ep = nullptr;
     int ep_node_order;
-    visit_id++;
+    actual_node_count_++;
 
 #ifdef VISIT_HASH
-    visited.clear();
+    visited_.clear();
 #endif
-    ep = layers[L]->enter_point;
-    ep_node_order = layers[L]->ep_node_order;
+    ep = layers_[L]->enter_point;
+    ep_node_order = layers_[L]->ep_node_order;
+    W_.clear();
+    auto dist = distance(getNodeVector(ep_node_order), q);
+    W_.emplace_back(ep, dist, ep_node_order);
+
+#ifdef VISIT_HASH
+    visited_.insert(ep_node_order);
+#else
+    ep->actual_node_count_ = actual_node_count_;
+#endif
+
+    for (int32_t i = L; i > 0; i--)
+    {
+        searchLayerOne(q);
+        changeLayer();
+    }
+#ifdef VISIT_HASH
+    visited_.clear();
+#endif
+    searchLayer(q, ef);
+    sort(W_.begin(), W_.end(), neighborcmp_nearest());
+}
+
+void HNSW::aproximateKnn(float* q, int k, int ef)
+{
+    int32_t L = layers_.size() - 1;
+    Node* down_node = nullptr;
+    Node* prev = nullptr;
+    Node* ep = nullptr;
+    int ep_node_order;
+    actual_node_count_++;
+
+#ifdef VISIT_HASH
+    visited_.clear();
+#endif
+    ep = layers_[L]->enter_point;
+    ep_node_order = layers_[L]->ep_node_order;
 #ifdef COMPUTE_APPROXIMATE_VECTOR
     apr_W.clear();
-    Node::computeApproximateVector(apr_q, q, shift, vector_size);
-    auto dist = apr_distance(apr_get_node_vector(layers[L]->ep_node_order), apr_q);
+    Node::computeApproximateVector(apr_q, q, shift, vector_size_);
+    auto dist = aprDistance(aprGetNodeVector(layers_[L]->ep_node_order), apr_q);
     apr_W.emplace_back(ep, dist, ep_node_order);
 #else
-    W.clear();
-    auto dist = distance(get_node_vector(ep_node_order), q);
-    W.emplace_back(ep, dist, ep_node_order);
+    W_.clear();
+    auto dist = distance(getNodeVector(ep_node_order), q);
+    W_.emplace_back(ep, dist, ep_node_order);
 #endif
 #ifdef VISIT_HASH
-    visited.insert(ep_node_order);
+    visited_.insert(ep_node_order);
 #else
-    ep->visit_id = visit_id;
+    ep->actual_node_count_ = actual_node_count_;
 #endif
 
     for (int32_t i = L; i > 0; i--)
     {
 #ifdef COMPUTE_APPROXIMATE_VECTOR
-        apr_search_layer_one(apr_q);
-        apr_change_layer();
+        aprSearchLayerOne(apr_q);
+        aprChangeLayer();
 #else
         search_layer_one(q);
         change_layer();
 #endif
     }
 #ifdef VISIT_HASH
-    visited.clear();
+    visited_.clear();
 #endif
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 #ifdef USE_TWO_FIXED_MAX
@@ -368,16 +421,19 @@ void HNSW::knn(float* q, int k, int ef)
     apr_search_layer(apr_q, ef);
 #endif
 #ifdef USE_TRESHOLD_SUMMARY
+    aprSearchLayerSummary(apr_q, ef);
+#endif
+#ifdef USE_SELECTED_TRESHOLD_SUMMARY
     apr_search_layer_summary(apr_q, ef);
 #endif
 #ifndef USE_PLAIN_CHAR
-    // TODO - throw runtime error if W.size() is less then ef
+    // TODO - throw runtime error if W_.size() is less then ef
     for (int i = 0; i < apr_W.size(); i++)
     {
-        auto item = distances.find(std::get<2>(apr_W[i]));
-        if (item == distances.end())
+        auto item = distances_.find(std::get<2>(apr_W[i]));
+        if (item == distances_.end())
         {
-            std::get<1>(apr_W[i]) = apr_distance(apr_q, apr_get_node_vector(std::get<2>(apr_W[i])));
+            std::get<1>(apr_W[i]) = aprDistance(apr_q, aprGetNodeVector(std::get<2>(apr_W[i])));
         }
         else
         {
@@ -388,7 +444,7 @@ void HNSW::knn(float* q, int k, int ef)
     sort(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
 #else
     search_layer(q, ef);
-    sort(W.begin(), W.end(), neighborcmp_nearest());
+    sort(W_.begin(), W_.end(), neighborcmp_nearest());
 #endif
 }
 
@@ -398,20 +454,43 @@ void HNSW::computeApproximateVector()
     shift = log(max_value) / log(2) - 8 < 0 ? 0 : log(max_value) / log(2) - 8 < 0;
     std::cout << "Compute approximate vectors (shift value " << shift << ")\n";
     auto start = std::chrono::system_clock::now();
-    index_memory = 0;
-    for (int k = 0; k <= visit_id; k++)
+    index_memory_ = 0;
+    for (int k = 0; k <= actual_node_count_; k++)
     {
-        auto vector = get_node_vector(k);
-        auto apr_vector = apr_get_node_vector(k);
-        for (int i = 0; i < vector_size; i++)
+        auto vector = getNodeVector(k);
+        auto apr_vector = aprGetNodeVector(k);
+        for (int i = 0; i < vector_size_; i++)
         {
             unsigned int aux = vector[i];
             apr_vector[i] = aux >> shift;
         }
     }
 
+//    clear_explored_count();
+//    float *v = new float[vector_size_];
+//    uint8_t  shifted_max_value = (int)max_value >> shift;
+//    std::cout << "max value " << (int)shifted_max_value << "\n";
+//    for (int i = 0; i < 100000; i++) {
+//        //std::cout << "-------------------\n";
+//        int i1 = rand() % actual_node_count_;
+//        int i2 = rand() % actual_node_count_;
+//        for (int k = 0; k < vector_size_; k++) {
+//            v[k] =  (get_node_vector(i1)[k] + getNodeVector(i2)[k]) / 2;
+//        }
+//        knn(v, 50);
+//    }
+//
+//    int histogram[500];
+//    for (int i = 0; i < 200; i++) histogram[i] = 0;
+//    for (auto& n: layers_[0]->nodes)
+//    {
+//        if (n->explored_count < 500)
+//            histogram[n->explored_count]++;
+//    }
+//    for (int i = 0; i < 200; i++) std::cout << histogram[i] << "\n";
+
     int overflows = 0;
-    for (auto& l : layers)
+    for (auto& l : layers_)
     {
         // mask version
         if (l->layer_id == 0)
@@ -419,11 +498,11 @@ void HNSW::computeApproximateVector()
             int i = 0;
             for (auto n : l->nodes)
             {
-
-                index_memory += computeSummaries(n, i++, vector_size, &overflows);
+                //if (n->explored_count > EXPLORE_COUNT_TRESHOLD)
+                    index_memory_ += computeSummaries(n, i++, vector_size_, &overflows);
 #ifdef COLLECT_STAT
-                stat.neighbor_count += n->neighbors.size();
-                stat.node_count++;
+                stat_.neighbor_count += n->neighbors.size();
+                stat_.node_count++;
 
 //                for (auto neig: n->neighbors)
 //                {
@@ -436,16 +515,16 @@ void HNSW::computeApproximateVector()
     auto end = std::chrono::system_clock::now();
     std::cout << "Compute approximate values: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " [s]\n";
 #ifdef COLLECT_STAT
-    stat.overflows = overflows;
+    stat_.overflows = overflows;
 #ifdef COUNT_INWARD_DEGREE
-    for (auto n : layers[0]->nodes)
+    for (auto n : layers_[0]->nodes)
     {
         if (n->inward_count >= 200)
         {
-            stat.histogram[199]++;
+            stat_.histogram[199]++;
         } else
         {
-            stat.histogram[n->inward_count]++;
+            stat_.histogram[n->inward_count]++;
         }
     }
 #endif
@@ -455,11 +534,11 @@ void HNSW::computeApproximateVector()
 
 int HNSW::computeSummaries(Node* node, pointer_t node_order, uint32_t vector_size, int* overflows)
 {
-    //neighbors_all = new uint8_t[neighbors.size() * vector_size];
+    //neighbors_all = new uint8_t[neighbors.size() * vector_size_];
     //int i = 0;
     //for (auto ng : neighbors)
     //{
-    //	memcpy(&neighbors_all[i * vector_size], ng.node->apr_vector, vector_size);
+    //	memcpy(&neighbors_all[i * vector_size_], ng.node->apr_vector, vector_size_);
     //	i++;
     //}
 
@@ -467,8 +546,8 @@ int HNSW::computeSummaries(Node* node, pointer_t node_order, uint32_t vector_siz
     std::priority_queue<std::pair<int, uint8_t>, std::vector<std::pair<int, uint8_t>>, CompareByDelta> delta;
     std::vector<Neighbors> &neighbors = node->neighbors;
     std::vector<int8_t>& summary = node->summary;
-    int row1_size = (int)(VECTOR_FRAGMENT1 * vector_size) * 2;
-    int row2_size = (int)(VECTOR_FRAGMENT2 * vector_size) * 2;
+    int row1_size = (int)(VECTOR_FRAGMENT1 * vector_size_) * 2;
+    int row2_size = (int)(VECTOR_FRAGMENT2 * vector_size_) * 2;
     int byte_size = (row1_size + row2_size) * neighbors.size();
     int first_block = row1_size * neighbors.size();
     auto pivot = apr_get_node_vector(node_order);
@@ -478,9 +557,9 @@ int HNSW::computeSummaries(Node* node, pointer_t node_order, uint32_t vector_siz
     for (auto ng : neighbors)
     {
         auto n = ng.node;
-        auto n_apr_vector = apr_get_node_vector(ng.node_order);
+        auto n_apr_vector = aprGetNodeVector(ng.node_order);
         uint8_t over_treshold = 0;
-        for (int i = 0; i < vector_size; i++)
+        for (int i = 0; i < vector_size_; i++)
         {
             int diff = n_apr_vector[i] - pivot[i];
 
@@ -538,14 +617,14 @@ int HNSW::computeSummaries(Node* node, pointer_t node_order, uint32_t vector_siz
     return byte_size;
 #else
     int neighbor_array_size = 0;
-    auto pivot = apr_get_node_vector(node_order);
+    auto pivot = aprGetNodeVector(node_order);
     auto &summary = node->summary;
     for (auto ng : node->neighbors)
     {
         auto n = ng.node;
 
         uint8_t over_treshold = 0;
-        auto n_apr_vector = apr_get_node_vector(ng.node_order);
+        auto n_apr_vector = aprGetNodeVector(ng.node_order);
         for (int i = 0; i < vector_size; i++)
         {
             neighbor_array_size += n_apr_vector[i] - pivot[i] > DISTANCE_TRESHOLD || pivot[i] - n_apr_vector[i] > DISTANCE_TRESHOLD;
@@ -559,7 +638,7 @@ int HNSW::computeSummaries(Node* node, pointer_t node_order, uint32_t vector_siz
         auto n = ng.node;
 
         uint8_t over_treshold = 0;
-        auto n_apr_vector = apr_get_node_vector(ng.node_order);
+        auto n_apr_vector = aprGetNodeVector(ng.node_order);
         for (int i = 0; i < vector_size; i++)
         {
             over_treshold += n_apr_vector[i] - pivot[i] > DISTANCE_TRESHOLD || pivot[i] - n_apr_vector[i] > DISTANCE_TRESHOLD;
@@ -594,17 +673,17 @@ int HNSW::computeSummaries(Node* node, pointer_t node_order, uint32_t vector_siz
 }
 #endif
 
-void HNSW::search_layer_one(float* q)
+void HNSW::searchLayerOne(float* q)
 {
     bool change = true;
     Node* actual;
     float actual_dist;
     pointer_t actual_node_order;
 
-    actual = W.front().node;
-    actual_dist = W.front().distance;
-    actual_node_order = W.front().node_order;
-    W.pop_back();
+    actual = W_.front().node;
+    actual_dist = W_.front().distance;
+    actual_node_order = W_.front().node_order;
+    W_.pop_back();
     while (change)
     {
         change = false;
@@ -612,16 +691,16 @@ void HNSW::search_layer_one(float* q)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
-            if (!visited.get(ne.node_order))
+            if (!visited_.get(ne.node_order))
             {
-                visited.insert(ne.node_order);
+                visited_.insert(ne.node_order);
 #else
-            if (e->visit_id < visit_id)
+            if (e->actual_node_count_ < actual_node_count_)
             {
-                e->visit_id = visit_id;
+                e->actual_node_count_ = actual_node_count_;
 
 #endif
-                auto dist = distance(get_node_vector(ne.node_order), q);
+                auto dist = distance(getNodeVector(ne.node_order), q);
 
                 if (dist < actual_dist)
                 {
@@ -633,8 +712,8 @@ void HNSW::search_layer_one(float* q)
             }
         }
     }
-    W.clear();
-    W.emplace_back(actual, actual_dist, actual_node_order);
+    W_.clear();
+    W_.emplace_back(actual, actual_dist, actual_node_order);
 }
 
 
@@ -643,64 +722,63 @@ void HNSW::search_layer_one(float* q)
 ////////////////////   Search Layer    ///////////////////////
 //////////////////////////////////////////////////////////////
 
-void HNSW::search_layer(float* q, int ef)
+void HNSW::searchLayer(float* q, int ef)
 {
     std::vector<std::tuple<Node*, int32_t>> C;
     
-    //W.push_back(ep);
-    for (auto n : W)
+    //W_.push_back(ep);
+    for (auto n : W_)
     {
         C.emplace_back(n.node, n.distance);
 #ifdef VISIT_HASH
-        visited.insert(n.node_order);
+        visited_.insert(n.node_order);
 #else
-        n->visit_id = visit_id;
+        n->actual_node_count_ = actual_node_count_;
 
 #endif
     }
-    std::make_heap(W.begin(), W.end(), neighborcmp_farest_heap());
+    std::make_heap(W_.begin(), W_.end(), neighborcmp_farest_heap());
     std::make_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
-    auto f = W.front().distance;
+    auto f = W_.front().distance;
     while (!C.empty())
     {
         auto c = C.front();
         std::pop_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
         C.pop_back();
-
         if (std::get<1>(c) > f) break;
         for (auto ne : std::get<0>(c)->neighbors)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
-            if (!visited.get(ne.node_order))
+            if (!visited_.get(ne.node_order))
             { 
-                visited.insert(ne.node_order);
+                visited_.insert(ne.node_order);
 #else
-            if (e->visit_id < visit_id)
+            if (e->actual_node_count_ < actual_node_count_)
             {
-                e->visit_id = visit_id;
+                e->actual_node_count_ = actual_node_count_;
 
 #endif
                 //e->distance = distance_treshold_counting(q, e->vector, e->no_over_treshold);
-                auto dist = distance(q, get_node_vector(ne.node_order));
+                auto dist = distance(q, getNodeVector(ne.node_order));
 
-                if (dist < f || W.size() < ef)
+                if (dist < f || W_.size() < ef)
                 {
                     C.emplace_back(e, dist);
                     std::push_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
-                    W.emplace_back(e, dist, ne.node_order);
-                    std::push_heap(W.begin(), W.end(), neighborcmp_farest_heap());
-                    if (W.size() > ef)
+                    W_.emplace_back(e, dist, ne.node_order);
+                    std::push_heap(W_.begin(), W_.end(), neighborcmp_farest_heap());
+                    if (W_.size() > ef)
                     {
-                        std::pop_heap(W.begin(), W.end(), neighborcmp_farest_heap());
-                        W.pop_back();
+                        std::pop_heap(W_.begin(), W_.end(), neighborcmp_farest_heap());
+                        W_.pop_back();
                     }
-                    f = W.front().distance;
+                    f = W_.front().distance;
                 }
 #ifdef COLLECT_STAT
                 else
                 {
-                    stat.distance_computations_false++;
+                    stat_.distance_computations_false++;
                 }
 #endif
             }
@@ -711,7 +789,7 @@ void HNSW::search_layer(float* q, int ef)
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 
 
-void HNSW::apr_search_layer_one(uint8_t* q)
+void HNSW::aprSearchLayerOne(uint8_t* q)
 {
     bool change = true;
     Node *actual;
@@ -730,15 +808,15 @@ void HNSW::apr_search_layer_one(uint8_t* q)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
-            if (!visited.get(ne.node_order))
+            if (!visited_.get(ne.node_order))
             {
-                visited.insert(ne.node_order);
+                visited_.insert(ne.node_order);
 #else
-            if (e->visit_id < visit_id)
+            if (e->actual_node_count_ < actual_node_count_)
             {
-                e->visit_id = visit_id;
+                e->actual_node_count_ = actual_node_count_;
 #endif
-                auto dist = apr_distance(apr_get_node_vector(ne.node_order), q);
+                auto dist = aprDistance(aprGetNodeVector(ne.node_order), q);
 
                 if (dist < actual_dist)
                 {
@@ -750,7 +828,7 @@ void HNSW::apr_search_layer_one(uint8_t* q)
 #ifdef COLLECT_STAT
                 else
                 {
-                    stat.distance_computations_false++;
+                    stat_.distance_computations_false++;
                 }
 #endif
             }
@@ -761,18 +839,18 @@ void HNSW::apr_search_layer_one(uint8_t* q)
 }
 
 
-void HNSW::apr_search_layer(uint8_t* apr_q, int ef)
+void HNSW::aprSearchLayer(uint8_t* q, int ef)
 {
     std::vector<std::tuple<Node*, int32_t>> C;
 
     //apr_W.push_back(ep);
-    for (auto n : apr_W)
+    for (auto& n : apr_W)
     {
         C.emplace_back(std::get<0>(n), std::get<1>(n));
 #ifdef VISIT_HASH
-        visited.insert(std::get<2>(n));
+        visited_.insert(std::get<2>(n));
 #else
-        n->visit_id = visit_id;
+        n->actual_node_count_ = actual_node_count_;
 
 #endif
     }
@@ -786,20 +864,20 @@ void HNSW::apr_search_layer(uint8_t* apr_q, int ef)
         C.pop_back();
 
         if (std::get<1>(c) > f) break;
-        for (auto ne : std::get<0>(c)->neighbors)
+        for (auto& ne : std::get<0>(c)->neighbors)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
-            if (!visited.get(ne.node_order))
+            if (!visited_.get(ne.node_order))
             {
-                visited.insert(ne.node_order);
+                visited_.insert(ne.node_order);
 #else
-            if (e->visit_id < visit_id)
+            if (e->actual_node_count_ < actual_node_count_)
             {
-                e->visit_id = visit_id;
+                e->actual_node_count_ = actual_node_count_;
 
 #endif
-                auto dist = apr_distance(apr_q, apr_get_node_vector(ne.node_order));
+                auto dist = aprDistance(q, aprGetNodeVector(ne.node_order));
 
                 if (dist < f || apr_W.size() < ef)
                 {
@@ -817,7 +895,7 @@ void HNSW::apr_search_layer(uint8_t* apr_q, int ef)
 #ifdef COLLECT_STAT
                 else
                 {
-                    stat.distance_computations_false++;
+                    stat_.distance_computations_false++;
                 }
 #endif
             }
@@ -826,22 +904,22 @@ void HNSW::apr_search_layer(uint8_t* apr_q, int ef)
 }
 
 
-void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
+void HNSW::aprSearchLayerSummary(uint8_t* q, int ef)
 {
     std::vector<std::tuple<Node*, int32_t, pointer_t>> C;
 
-    distances.clear();
-    //W.push_back(ep);
-    for (auto n : apr_W)
+    distances_.clear();
+    //W_.push_back(ep);
+    for (auto& n : apr_W)
     {
         C.emplace_back(std::get<0>(n), -std::get<1>(n), std::get<2>(n));
     }
     std::make_heap(C.begin(), C.end(), CompareByDistanceInTuple());
     auto f = std::get<1>(apr_W.front());
 #ifdef VISIT_HASH
-    visited.insert(std::get<2>(apr_W.front()));
+    visited_.insert(std::get<2>(apr_W.front()));
 #else
-    std::get<0>(apr_W.front())->visit_id = visit_id;
+    std::get<0>(apr_W.front())->actual_node_count_ = actual_node_count_;
 #endif
 
     while (!C.empty())
@@ -853,25 +931,31 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
 
         if (-std::get<1>(c) > f) break;
 #ifdef COLLECT_STAT
-        stat.explored_nodes++;
+        stat_.explored_nodes++;
 #endif
-        uint32_t c_distance = apr_distance(apr_q, apr_get_node_vector(std::get<2>(c)), q_delta);
-        distances[std::get<2>(c)] = c_distance;
+        uint32_t c_distance = aprDistance(q, aprGetNodeVector(std::get<2>(c)), q_delta);
+        distances_[std::get<2>(c)] = c_distance;
         int node_summary_position = 0;
-        for (auto ne : nc->neighbors)
+        for (auto& ne : nc->neighbors)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
-            if (!visited.get(ne.node_order))
+            if (!visited_.get(ne.node_order))
             {
-                visited.insert(ne.node_order);
+                visited_.insert(ne.node_order);
 #else
-            if (e->visit_id < visit_id)
+            if (e->actual_node_count_ < actual_node_count_)
             {
-                e->visit_id = visit_id;
+                e->actual_node_count_ = actual_node_count_;
 #endif
+                int32_t distance;
+//                if (nc->explored_count > EXPLORE_COUNT_TRESHOLD) {
+//                    distance = aprDistanceSummary(nc->summary, node_summary_position, q_delta, c_distance);
+//                } else {
+//                    distance = aprDistance(apr_q, aprGetNodeVector(ne.node_order));
+//                }
+                distance = aprDistanceSummary(nc->summary, node_summary_position, q_delta, c_distance);
 
-                int32_t distance = apr_distance_summary(nc->summary, node_summary_position, q_delta, c_distance);
 
                 if (distance < f || apr_W.size() < ef)
                 {
@@ -889,30 +973,31 @@ void HNSW::apr_search_layer_summary(uint8_t* apr_q, int ef)
             }
             else
             {
-                node_summary_position = nc->summary[node_summary_position] * 2 + 1 + node_summary_position;
+//                if (nc->explored_count > EXPLORE_COUNT_TRESHOLD)
+                    node_summary_position = nc->summary[node_summary_position] * 2 + 1 + node_summary_position;
             }
         }
     }
 }
 
 
-void HNSW::apr_search_layer_double_summary(uint8_t* apr_q, int ef)
+void HNSW::aprSearchLayerDoubleSummary(uint8_t* q, int ef)
 {
     std::vector<std::tuple<Node*, int32_t, pointer_t>> C;
     std::vector<std::tuple<int32_t, int32_t, Node*, pointer_t >> W1;
 
-    distances.clear();
-    //W.push_back(ep);
-    for (auto n : apr_W)
+    distances_.clear();
+    //W_.push_back(ep);
+    for (auto& n : apr_W)
     {
         C.emplace_back(std::get<0>(n), -std::get<1>(n), std::get<2>(n));
     }
     std::make_heap(C.begin(), C.end(), CompareByDistanceInTuple());
     auto f = std::get<1>(apr_W.front());
 #ifdef VISIT_HASH
-    visited.insert(std::get<2>(apr_W.front()));
+    visited_.insert(std::get<2>(apr_W.front()));
 #else
-    std::get<0>(apr_W.front())->visit_id = visit_id;
+    std::get<0>(apr_W.front())->actual_node_count_ = actual_node_count_;
 #endif
 
     while (!C.empty())
@@ -924,25 +1009,26 @@ void HNSW::apr_search_layer_double_summary(uint8_t* apr_q, int ef)
 
         if (-std::get<1>(c) > f) break;
 #ifdef COLLECT_STAT
-        stat.explored_nodes++;
+        stat_.explored_nodes++;
 #endif
-        uint32_t c_distance = apr_distance(apr_q, apr_get_node_vector(std::get<2>(c)), q_delta);
-        distances[std::get<2>(c)] = c_distance;
+        uint32_t c_distance = aprDistance(q, aprGetNodeVector(std::get<2>(c)), q_delta);
+        distances_[std::get<2>(c)] = c_distance;
         int node_summary_position = 0;
         int row = 0;
-        for (auto ne : nc->neighbors)
+        for (auto& ne : nc->neighbors)
         {
             auto e = ne.node;
 #ifdef VISIT_HASH
-            if (!visited.get(ne.node_order))
+            if (!visited_.get(ne.node_order))
             {
-                visited.insert(ne.node_order);
+                visited_.insert(ne.node_order);
 #else
-            if (e->visit_id < visit_id)
+            if (e->actual_node_count_ < actual_node_count_)
             {
-                e->visit_id = visit_id;
+                e->actual_node_count_ = actual_node_count_;
 #endif
-                int32_t distance = apr_distance_summary_fixed(nc->summary, node_summary_position, q_delta, c_distance, row1_size);
+                int32_t distance = aprDistanceSummaryFixedSize(nc->summary, node_summary_position, q_delta, c_distance,
+                                                               row1_size);
                 W1.emplace_back(-distance, row, e, ne.node_order);
             }
             node_summary_position = row1_size + node_summary_position;
@@ -958,7 +1044,8 @@ void HNSW::apr_search_layer_double_summary(uint8_t* apr_q, int ef)
             while (node_counter >= 0)
             {
                 auto n = W1.front();
-                int32_t distance = apr_distance_summary_fixed(nc->summary, block1_size + std::get<1>(n) * row2_size, q_delta, -std::get<0>(n), row2_size);
+                int32_t distance = aprDistanceSummaryFixedSize(nc->summary, block1_size + std::get<1>(n) * row2_size,
+                                                               q_delta, -std::get<0>(n), row2_size);
 
 
                 if (distance < f || apr_W.size() < ef)
@@ -988,10 +1075,10 @@ void HNSW::apr_search_layer_double_summary(uint8_t* apr_q, int ef)
 
 
 // Algorithm 4
-void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned)
+void HNSW::selectNeighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned)
 {
     //std::vector<Node*> Wd;
-    //Wd.reserve(M);
+    //Wd.reserve(M_);
 
     if (W.size() < M)
     {
@@ -1010,9 +1097,9 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
         bool q_is_close = true;
         for (int j = 0; j < R.size(); j++)
         {
-            float dist = distance(get_node_vector(W[i].node_order), get_node_vector(R[j].node_order));
+            float dist = distance(getNodeVector(W[i].node_order), getNodeVector(R[j].node_order));
 #ifdef NSG
-            if (dist < W[i].distance && R[j].distance < W[i].distance)
+            if (dist < W_[i].distance && R[j].distance < W_[i].distance)
 #else
             if (dist < W[i].distance)
 #endif
@@ -1023,7 +1110,7 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
 
         }
 #ifdef COUNT_INWARD_DEGREE
-        if (q_is_close || W[i].node->inward_count <= M/4)
+        if (q_is_close || W_[i].node->inward_count <= M_/4)
 #else
         if (q_is_close)
 #endif
@@ -1033,7 +1120,7 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
         }
         //else
         //{
-        //    Wd.push_back(W[i]);
+        //    Wd.push_back(W_[i]);
         //}
         i++;
     }
@@ -1042,7 +1129,7 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
 
     //    //std::sort(Wd.begin(), Wd.end(), nodecmp_farest_with_overflow());
     //    int Wdi = 0;
-    //    while (s < M && Wdi < Wd.size())
+    //    while (s < M_ && Wdi < Wd.size())
     //    {
     //        R.push_back(Wd[Wdi++]);
     //        s++;
@@ -1054,14 +1141,14 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
     /////////////////////////////////////////////// using heap instead of sort, not working quite well
 
     //std::priority_queue<std::pair<int32_t, Node*>, std::vector<std::pair<int32_t, Node*>>, CompareByFirst> A;
-    //for (int i = 1; i < W.size(); i++)
+    //for (int i = 1; i < W_.size(); i++)
     //{
-    //    A.emplace(-W[i]->distance, W[i]);
+    //    A.emplace(-W_[i]->distance, W_[i]);
     //}
 
     //R.clear();
-    //R.push_back(W[0]);
-    //while (!A.empty() && R.size() < M)
+    //R.push_back(W_[0]);
+    //while (!A.empty() && R.size() < M_)
     //{
     //    auto n = A.top();
     //    auto ndist = -n.first;
@@ -1088,7 +1175,7 @@ void HNSW::select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R
 ////////////////////   Serialization    ///////////////////////
 //////////////////////////////////////////////////////////////
 
-void HNSW::saveKNNG(const char* filename)
+void HNSW::saveGraph(const char* filename)
 {
     try {
         std::ofstream f(filename, std::ios::binary);
@@ -1099,16 +1186,17 @@ void HNSW::saveKNNG(const char* filename)
             return;
         }
 
-        f.write(reinterpret_cast<const char *>(&max_node_count), sizeof(max_node_count));
-        f.write(reinterpret_cast<const char *>(&vector_size), sizeof(vector_size));
-        f.write(reinterpret_cast<const char *>(&visit_id), sizeof(visit_id));
-        f.write(reinterpret_cast<const char *>(vector_data), sizeof(float) * max_node_count * vector_size);
-        auto l_size = layers.size();
+        f.write(reinterpret_cast<const char *>(&max_node_count_), sizeof(max_node_count_));
+        f.write(reinterpret_cast<const char *>(&vector_size_), sizeof(vector_size_));
+        f.write(reinterpret_cast<const char *>(&actual_node_count_), sizeof(actual_node_count_));
+        f.write(reinterpret_cast<const char *>(&max_value), sizeof(max_value));
+        f.write(reinterpret_cast<const char *>(vector_data_), sizeof(float) * max_node_count_ * vector_size_);
+        auto l_size = layers_.size();
         f.write(reinterpret_cast<const char *>(&l_size), sizeof(l_size));
 
         std::unordered_map<Node*, int> node_map;
         std::vector<Node*> node_vector;
-        for (auto& l : layers)
+        for (auto& l : layers_)
         {
             auto l_size = l->nodes.size();
             f.write(reinterpret_cast<const char *>(&l_size), sizeof(l_size));
@@ -1121,7 +1209,7 @@ void HNSW::saveKNNG(const char* filename)
             }
         }
 
-        for (auto& l : layers)
+        for (auto& l : layers_)
         {
             f.write(reinterpret_cast<const char *>(&l->ep_node_order), sizeof(l->ep_node_order));
             auto order = node_map[l->enter_point];
@@ -1151,7 +1239,7 @@ void HNSW::saveKNNG(const char* filename)
 
 
 
-void HNSW::loadKNNG(const char* filename)
+void HNSW::loadGraph(const char* filename)
 {
     try {
         std::ifstream f(filename, std::ios::binary);
@@ -1160,21 +1248,23 @@ void HNSW::loadKNNG(const char* filename)
             return;
         }
 
-        f.read(reinterpret_cast<char *>(&max_node_count), sizeof(max_node_count));
-        f.read(reinterpret_cast<char *>(&vector_size), sizeof(vector_size));
-        f.read(reinterpret_cast<char *>(&visit_id), sizeof(visit_id));
-        init(vector_size, max_node_count);
-        f.read(reinterpret_cast<char *>(vector_data), sizeof(float) * max_node_count * vector_size);
-        auto l_size = layers.size();
+        max_value = 220; // TODO write and read
+        f.read(reinterpret_cast<char *>(&max_node_count_), sizeof(max_node_count_));
+        f.read(reinterpret_cast<char *>(&vector_size_), sizeof(vector_size_));
+        f.read(reinterpret_cast<char *>(&actual_node_count_), sizeof(actual_node_count_));
+        f.read(reinterpret_cast<char *>(&max_value), sizeof(max_value));
+        init(vector_size_, max_node_count_);
+        f.read(reinterpret_cast<char *>(vector_data_), sizeof(float) * max_node_count_ * vector_size_);
+        auto l_size = layers_.size();
         f.read(reinterpret_cast<char *>(&l_size), sizeof(l_size));
 
         for (int i = 0; i < l_size; i++)
         {
-            layers.emplace_back(std::make_unique<Layer>());
+            layers_.emplace_back(std::make_unique<Layer>());
         }
 
         std::vector<Node *> node_vector;
-        for (auto &l : layers) {
+        for (auto &l : layers_) {
             std::size_t l_size;
             f.read(reinterpret_cast<char *>(&l_size), sizeof(l_size));
             //l->nodes.resize(l_size);
@@ -1188,7 +1278,7 @@ void HNSW::loadKNNG(const char* filename)
         }
 
 
-        for (auto &l : layers) {
+        for (auto &l : layers_) {
             f.read(reinterpret_cast<char *>(&l->ep_node_order), sizeof(l->ep_node_order));
             int order;
             f.read(reinterpret_cast<char *>(&order), sizeof(order));
@@ -1225,15 +1315,15 @@ void HNSW::loadKNNG(const char* filename)
 void HNSW::printInfo(bool all)
 {
     std::cout << "HNSW info\n";
-    for (int i = 0; i < layers.size(); i++)
+    for (int i = 0; i < layers_.size(); i++)
     {
-        std::cout << "Layer " << i << " " << layers[i]->node_count << "\n";
+        std::cout << "Layer " << i << " " << layers_[i]->nodes.size() << "\n";
     }
-    std::cout << "Index memory: " << index_memory / (1024 * 1024) << " [MB]\n";
-    std::cout << "M: " << M << "\n";
-    std::cout << "Mmax: " << Mmax << "\n";
-    std::cout << "ml: " << ml << "\n";
-    std::cout << "efConstruction: " << efConstruction << "\n";
+    std::cout << "Index memory: " << index_memory_ / (1024 * 1024) << " [MB]\n";
+    std::cout << "M_: " << M_ << "\n";
+    std::cout << "Mmax_: " << Mmax_ << "\n";
+    std::cout << "ml_: " << ml_ << "\n";
+    std::cout << "efConstruction_: " << efConstruction_ << "\n";
 #ifdef COMPUTE_APPROXIMATE_VECTOR   
 #ifdef USE_TWO_FIXED_MAX
     std::cout << "VECTOR_FRAGMENT1: " << (float)VECTOR_FRAGMENT1 << "\n";
@@ -1250,7 +1340,7 @@ void HNSW::print(int max_count)
 
         for (int i = 0; i < max_count; i++) {
             std::cout << i << ": ";
-            auto node = layers[0]->nodes[i];
+            auto node = layers_[0]->nodes[i];
             std::vector<int> d;
             for (auto ne : node->neighbors)
             {

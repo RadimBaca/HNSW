@@ -7,16 +7,18 @@
 #define MAIN_RUN_CREATE_AND_QUERY_WITHOUT_HDF5
 
 #define LOAD_GRAPH
+constexpr char load_file[] = "sift_1M.bin";
 
 //#define DEBUG_NET // TODO implement assert
 #define COLLECT_STAT
 
-#define VISIT_HASH // visited is implemented using a hash map
+#define VISIT_HASH // visited_ is implemented using a hash map
 
 //#define COUNT_INWARD_DEGREE
 #define COMPUTE_APPROXIMATE_VECTOR
 //#define APR_DEBUG
 
+constexpr int kX = 255;
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 
@@ -27,6 +29,8 @@
 
 
 constexpr uint8_t DISTANCE_TRESHOLD = 16;
+
+constexpr int EXPLORE_COUNT_TRESHOLD = 10;
 
 constexpr float VECTOR_FRAGMENT1 = 0.1;
 constexpr float VECTOR_FRAGMENT2 = 0.15;

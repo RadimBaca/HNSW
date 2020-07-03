@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include "Node.h"
+#include "node.h"
 #include "settings.h"
 
 
@@ -26,6 +26,13 @@ public:
 	}
 
 	Layer() {}
+
+	~Layer() {
+	    for(auto& n: nodes)
+        {
+	        delete n;
+        }
+	}
 
 	Layer(const Layer& layer) = delete;
 };

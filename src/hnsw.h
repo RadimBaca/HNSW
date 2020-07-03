@@ -39,8 +39,8 @@
 #endif
 #endif
 
-#include "Node.h"
-#include "Layer.h"
+#include "node.h"
+#include "layer.h"
 #include "settings.h"
 
 #ifdef MAIN_RUN_CREATE_AND_QUERY
@@ -218,29 +218,30 @@ class HNSW
 {
 public:
 
-	int M;
-	int Mmax;
-	int Mmax0;
-	int efConstruction;
-	float ml;
-	int max_node_count;
-	int min_M;
+	int M_;
+	int Mmax_;
+	int Mmax0_;
+	int efConstruction_;
+	float ml_;
+	int max_node_count_;
+	int min_M_;
 
-	long long index_memory;
-	std::vector<std::unique_ptr<Layer>> layers;
-	float* vector_data;
+	long long index_memory_;
+	std::vector<std::unique_ptr<Layer>> layers_;
+	float* vector_data_;
 
-	int vector_data_row_size;
-	bool data_cleaned;
+	bool data_cleaned_;
 
-	int visit_id;
-	std::vector<Neighbors> W;
-	std::unordered_map<pointer_t, uint32_t> distances;
+	int actual_node_count_;
+    uint32_t vector_size_;
+
+	std::vector<Neighbors> W_;
+	std::unordered_map<pointer_t, uint32_t> distances_;
 #ifdef VISIT_HASH
-	linearHash visited;
+	linearHash visited_; // TODO replace by some different hashing technique (or cuckoo filter)
 #endif
 #ifdef COLLECT_STAT
-	HNSW_Stat stat;
+	HNSW_Stat stat_;
 #endif
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 	float* min_vector;
@@ -263,26 +264,24 @@ public:
 	uint8_t query_negative_avg[2]; // average distance of regions (LNQ, SNQ)
 #endif
 
-	//uint32_t vector_count;
-	uint32_t vector_size;
 	uint32_t vector_parts;      // vector_size / number of 16-bit values in vector register
 
 	HNSW(int M, int Mmax, int efConstruction)
-		:M(M),
-		Mmax(Mmax),
-		Mmax0(Mmax*2),
-		efConstruction(efConstruction),
-		visit_id(-1),
-		max_node_count(0),
-		data_cleaned(true),
-		min_M(M / 2)
+		: M_(M),
+          Mmax_(Mmax),
+          Mmax0_(Mmax * 2),
+          efConstruction_(efConstruction),
+          actual_node_count_(-1),
+          max_node_count_(0),
+          data_cleaned_(true),
+          min_M_(M / 2)
 	{
-        ml = 1 / log(1.0 * M);
+        ml_ = 1 / log(0.8 * M);
 	}
 
 	~HNSW()
 	{
-		if (!data_cleaned)
+		if (!data_cleaned_)
 		{
 			clean();
 		}
@@ -298,7 +297,7 @@ public:
 #endif
 
 	void insert(float* q);
-	void knn(float* q, int k, int ef);
+	void aproximateKnn(float* q, int k, int ef);
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 	void computeApproximateVector();
 	int computeSummaries(Node* node, pointer_t node_order, uint32_t vector_size, int* overflows);
@@ -306,23 +305,24 @@ public:
 	void printInfo(bool all);
 	void print(int max_count);
 
-    void saveKNNG(const char* filename);
-    void loadKNNG(const char* filename);
+    void saveGraph(const char* filename);
+    void loadGraph(const char* filename);
 private:
 
-	void search_layer_one(float* q);
-	void search_layer(float* q, int ef);
-	void select_neighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned);
+    void knn(float* q, int ef);
+	void searchLayerOne(float* q);
+	void searchLayer(float* q, int ef);
+	void selectNeighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned);
 
-	inline float* get_node_vector(pointer_t node_order) { return vector_data + node_order * vector_size; }
+	inline float* getNodeVector(pointer_t node_order) { return vector_data_ + node_order * vector_size_; }
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
-	void apr_search_layer_one(uint8_t* q);
-	void apr_search_layer(uint8_t* q, int ef);
-	void apr_search_layer_summary(uint8_t* q, int ef);
-	void apr_search_layer_double_summary(uint8_t* q, int ef);
+	void aprSearchLayerOne(uint8_t* q);
+	void aprSearchLayer(uint8_t* q, int ef);
+	void aprSearchLayerSummary(uint8_t* q, int ef);
+	void aprSearchLayerDoubleSummary(uint8_t* q, int ef);
 
-	inline uint8_t* apr_get_node_vector(pointer_t node_order) { return apr_vector_data + node_order * vector_size; }
+	inline uint8_t* aprGetNodeVector(pointer_t node_order) { return apr_vector_data + node_order * vector_size_; }
 
 #endif
 
@@ -334,7 +334,7 @@ private:
     float distance(float *pVect1v, float *pVect2v) {
         float *pVect1 = pVect1v;
         float *pVect2 = pVect2v;
-        size_t qty = vector_size;
+        size_t qty = vector_size_;
         float PORTABLE_ALIGN32 TmpRes[8];
         // size_t qty4 = qty >> 2;
         size_t qty16 = qty >> 4;
@@ -387,11 +387,11 @@ private:
     inline float distance(float* q, float* node)
 	{
 #ifdef COLLECT_STAT
-		stat.precise_distance_computations++;
+		stat_.precise_distance_computations++;
 #endif
 
 		float result = 0;
-		for (unsigned int i = 0; i < vector_size; i++)
+		for (unsigned int i = 0; i < vector_size_; i++)
 		{
 			float t = q[i] - node[i];
 			result += t * t;
@@ -403,12 +403,12 @@ private:
 //	inline float distance_treshold_counting(float* q, float* node, uint32_t& no_over_treshold)
 //	{
 //#ifdef COLLECT_STAT
-//		stat.precise_distance_computations++;
+//		stat_.precise_distance_computations++;
 //#endif
 //
 //		float result = 0;
 //		no_over_treshold = 0;
-//		for (unsigned int i = 0; i < vector_size; i++)
+//		for (unsigned int i = 0; i < vector_size_; i++)
 //		{
 //			float t = q[i] - node[i];
 //			result += t * t;
@@ -452,10 +452,13 @@ private:
         return output;
     }
 #else
-    inline uint32_t apr_distance(uint8_t* q, uint8_t* node)
+	inline uint32_t aprDistance(uint8_t* q, uint8_t* node)
 	{
+#ifdef COLLECT_STAT
+		stat_.distance_computations++;
+#endif
 		uint32_t result = 0;
-		for (unsigned int i = 0; i < vector_size; i++)
+		for (unsigned int i = 0; i < vector_size_; i++)
 		{
 			int32_t t = q[i] - node[i];
 			result += t * t;
@@ -464,13 +467,13 @@ private:
 	}
 #endif
 
-	inline uint32_t apr_distance(uint8_t* q, uint8_t* node, int* q_delta)
+	inline uint32_t aprDistance(uint8_t* q, uint8_t* node, int* q_delta)
 	{
 #ifdef COLLECT_STAT
-		stat.distance_computations++;
+		stat_.distance_computations++;
 #endif
 		uint32_t result = 0;
-		for (unsigned int i = 0; i < vector_size; i++)
+		for (unsigned int i = 0; i < vector_size_; i++)
 		{
 			int32_t t = q[i] - node[i];
 			result += t * t;
@@ -480,16 +483,16 @@ private:
 	}
 
 
-//    inline uint32_t apr_distance(uint8_t* q, uint8_t* node, int* q_delta)
+//    inline uint32_t aprDistance(uint8_t* q, uint8_t* node, int* q_delta)
 //    {
 //#ifdef COLLECT_STAT
-//        stat.distance_computations++;
+//        stat_.distance_computations++;
 //#endif
 //        uint8_t* a = q;
 //        uint8_t* b = node;
 //        int* d = q_delta;
 //        uint32_t result = 0;
-//        auto s = vector_size >> 2;
+//        auto s = vector_size_ >> 2;
 //        for (unsigned int i = 0; i < s; i++)
 //        {
 //            int32_t t = (*a) - (*b);
@@ -520,10 +523,10 @@ private:
 //        return result;
 //    }
 
-	inline uint32_t apr_distance_summary(std::vector<int8_t>&node_summary, int& node_summary_position, int* q_delta, uint32_t pivot_distance)
+	inline uint32_t aprDistanceSummary(std::vector<int8_t>&node_summary, int& node_summary_position, int* q_delta, uint32_t pivot_distance)
 	{
 #ifdef COLLECT_STAT
-		stat.distance_computations++;
+		stat_.distance_computations++;
 #endif
 		uint32_t result = pivot_distance;
 		int c = node_summary[node_summary_position] * 2 + 1 + node_summary_position;
@@ -538,10 +541,10 @@ private:
 		return result;
 	}
 
-	inline uint32_t apr_distance_summary_fixed(std::vector<int8_t>& node_summary, int node_summary_position, int* q_delta, uint32_t pivot_distance, int row_size)
+	inline uint32_t aprDistanceSummaryFixedSize(std::vector<int8_t>& node_summary, int node_summary_position, int* q_delta, uint32_t pivot_distance, int row_size)
 	{
 #ifdef COLLECT_STAT
-		stat.distance_computations++;
+		stat_.distance_computations++;
 #endif
 		uint32_t result = pivot_distance;
 		for (int i = node_summary_position; i < node_summary_position + row_size; i += 2)
@@ -554,7 +557,7 @@ private:
 		return result;
 	}
 
-	void apr_change_layer()
+	void aprChangeLayer()
 	{
 		for (int i = 0; i < apr_W.size(); i++)
 		{
@@ -563,22 +566,22 @@ private:
 			std::get<0>(apr_W[i]) = node->lower_layer;
 			std::get<0>(apr_W[i])->copyInsertValues(*node);
 			//#ifdef VISIT_HASH
-			//			visited.insert(W[i]->uniqueId);
+			//			visited_.insert(W_[i]->uniqueId);
 			//#endif
 		}
 	}
 #endif
 
-	void change_layer()
+	void changeLayer()
 	{
-		for (int i = 0; i < W.size(); i++)
+		for (int i = 0; i < W_.size(); i++)
 		{
-			auto n = W[i];
+			auto n = W_[i];
 			auto node = n.node;
-			W[i].node = W[i].node->lower_layer;
-			W[i].node->copyInsertValues(*node);
+            W_[i].node = W_[i].node->lower_layer;
+			W_[i].node->copyInsertValues(*node);
 //#ifdef VISIT_HASH
-//			visited.insert(W[i]->uniqueId);
+//			visited_.insert(W_[i]->uniqueId);
 //#endif
 		}
 	}
@@ -586,7 +589,15 @@ private:
 
     void setVectorSize(uint32_t vsize)
     {
-        vector_size = vsize;
+        vector_size_ = vsize;
         vector_parts = vsize / 16;
     }
+
+//    void clear_explored_count()
+//    {
+//	    for (auto& n: layers_[0]->nodes)
+//        {
+//	        n->explored_count = 0;
+//        }
+//    }
 };
