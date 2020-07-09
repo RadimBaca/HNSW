@@ -173,6 +173,7 @@ void HNSW::insert(float* q)
     std::vector<Neighbors> Roverflow;
 
     actual_node_count_++;
+    visid_id++;
     if (actual_node_count_ >= max_node_count_)
     {
         throw std::runtime_error("HNSW: exceeded maximal number of nodes\n");
@@ -187,7 +188,6 @@ void HNSW::insert(float* q)
 //    if (actual_node_count_ > 100 && l > 0)
 //    {
 //        knn(q, Mmax0_);
-//        actual_node_count_--;
 //        bool is_multi_level_close = false;
 //        for(auto& n : W_){
 //            if (n.node->pivot)
@@ -267,9 +267,6 @@ void HNSW::insert(float* q)
         {
             Neighbors &e = R[i];
             Node* enode = e.node;
-#ifdef COUNT_INWARD_DEGREE
-            enode->inward_count++;
-#endif
             new_node->neighbors.emplace_back(enode, e.distance, e.node_order);
 
             bool insert_new = true;
@@ -286,27 +283,15 @@ void HNSW::insert(float* q)
                 Woverflow = enode->neighbors;
                 Woverflow.emplace_back(new_node, e.distance, actual_node_count_);
                 selectNeighbors(Woverflow, Roverflow, actualMmax, false);
-#ifdef COUNT_INWARD_DEGREE
-                for (auto item : enode->neighbors)
-                {
-                    item.node->inward_count--;
-                }
-#endif
                 enode->neighbors.clear();
                 for (auto r : Roverflow)
                 {
-#ifdef COUNT_INWARD_DEGREE
-                    r.node->inward_count++;
-#endif
                     enode->neighbors.emplace_back(r);
                 }
 
             }
             else
             {
-#ifdef COUNT_INWARD_DEGREE
-                new_node->inward_count++;
-#endif
                 enode->neighbors.emplace_back(new_node, e.distance, actual_node_count_);
             }
         }
@@ -341,7 +326,7 @@ void HNSW::knn(float* q, int ef)
     Node* prev = nullptr;
     Node* ep = nullptr;
     int ep_node_order;
-    actual_node_count_++;
+    visid_id++;
 
 #ifdef VISIT_HASH
     visited_.clear();
@@ -355,7 +340,7 @@ void HNSW::knn(float* q, int ef)
 #ifdef VISIT_HASH
     visited_.insert(ep_node_order);
 #else
-    ep->actual_node_count_ = actual_node_count_;
+    ep->visid_id_ = visid_id_;
 #endif
 
     for (int32_t i = L; i > 0; i--)
@@ -377,7 +362,7 @@ void HNSW::aproximateKnn(float* q, int k, int ef)
     Node* prev = nullptr;
     Node* ep = nullptr;
     int ep_node_order;
-    actual_node_count_++;
+    visid_id++;
 
 #ifdef VISIT_HASH
     visited_.clear();
@@ -397,7 +382,7 @@ void HNSW::aproximateKnn(float* q, int k, int ef)
 #ifdef VISIT_HASH
     visited_.insert(ep_node_order);
 #else
-    ep->actual_node_count_ = actual_node_count_;
+    ep->visid_id_ = visid_id_;
 #endif
 
     for (int32_t i = L; i > 0; i--)
@@ -418,7 +403,7 @@ void HNSW::aproximateKnn(float* q, int k, int ef)
     apr_search_layer_double_summary(apr_q, ef);
 #endif
 #ifdef USE_PLAIN_CHAR
-    apr_search_layer(apr_q, ef);
+    aprSearchLayer(apr_q, ef);
 #endif
 #ifdef USE_TRESHOLD_SUMMARY
     aprSearchLayerSummary(apr_q, ef);
@@ -516,18 +501,6 @@ void HNSW::computeApproximateVector()
     std::cout << "Compute approximate values: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << " [s]\n";
 #ifdef COLLECT_STAT
     stat_.overflows = overflows;
-#ifdef COUNT_INWARD_DEGREE
-    for (auto n : layers_[0]->nodes)
-    {
-        if (n->inward_count >= 200)
-        {
-            stat_.histogram[199]++;
-        } else
-        {
-            stat_.histogram[n->inward_count]++;
-        }
-    }
-#endif
 #endif
 }
 
@@ -695,9 +668,9 @@ void HNSW::searchLayerOne(float* q)
             {
                 visited_.insert(ne.node_order);
 #else
-            if (e->actual_node_count_ < actual_node_count_)
+            if (e->visid_id_ < visid_id_)
             {
-                e->actual_node_count_ = actual_node_count_;
+                e->visid_id_ = visid_id_;
 
 #endif
                 auto dist = distance(getNodeVector(ne.node_order), q);
@@ -722,10 +695,17 @@ void HNSW::searchLayerOne(float* q)
 ////////////////////   Search Layer    ///////////////////////
 //////////////////////////////////////////////////////////////
 
+void HNSW::searchLayer(float* q, int ef, Node* start, pointer_t start_node_order) {
+    W_.clear();
+    visited_.clear();
+    W_.emplace_back(start, 0, start_node_order);
+    searchLayer(getNodeVector(start_node_order), 100);
+}
+
 void HNSW::searchLayer(float* q, int ef)
 {
     std::vector<std::tuple<Node*, int32_t>> C;
-    
+
     //W_.push_back(ep);
     for (auto n : W_)
     {
@@ -733,7 +713,7 @@ void HNSW::searchLayer(float* q, int ef)
 #ifdef VISIT_HASH
         visited_.insert(n.node_order);
 #else
-        n->actual_node_count_ = actual_node_count_;
+        n->visid_id_ = visid_id_;
 
 #endif
     }
@@ -754,9 +734,9 @@ void HNSW::searchLayer(float* q, int ef)
             { 
                 visited_.insert(ne.node_order);
 #else
-            if (e->actual_node_count_ < actual_node_count_)
+            if (e->visid_id_ < visid_id_)
             {
-                e->actual_node_count_ = actual_node_count_;
+                e->visid_id_ = visid_id_;
 
 #endif
                 //e->distance = distance_treshold_counting(q, e->vector, e->no_over_treshold);
@@ -812,9 +792,9 @@ void HNSW::aprSearchLayerOne(uint8_t* q)
             {
                 visited_.insert(ne.node_order);
 #else
-            if (e->actual_node_count_ < actual_node_count_)
+            if (e->visid_id_ < visid_id_)
             {
-                e->actual_node_count_ = actual_node_count_;
+                e->visid_id_ = visid_id_;
 #endif
                 auto dist = aprDistance(aprGetNodeVector(ne.node_order), q);
 
@@ -850,7 +830,7 @@ void HNSW::aprSearchLayer(uint8_t* q, int ef)
 #ifdef VISIT_HASH
         visited_.insert(std::get<2>(n));
 #else
-        n->actual_node_count_ = actual_node_count_;
+        n->visid_id_ = visid_id_;
 
 #endif
     }
@@ -872,9 +852,9 @@ void HNSW::aprSearchLayer(uint8_t* q, int ef)
             {
                 visited_.insert(ne.node_order);
 #else
-            if (e->actual_node_count_ < actual_node_count_)
+            if (e->visid_id_ < visid_id_)
             {
-                e->actual_node_count_ = actual_node_count_;
+                e->visid_id_ = visid_id_;
 
 #endif
                 auto dist = aprDistance(q, aprGetNodeVector(ne.node_order));
@@ -919,7 +899,7 @@ void HNSW::aprSearchLayerSummary(uint8_t* q, int ef)
 #ifdef VISIT_HASH
     visited_.insert(std::get<2>(apr_W.front()));
 #else
-    std::get<0>(apr_W.front())->actual_node_count_ = actual_node_count_;
+    std::get<0>(apr_W.front())->visid_id_ = visid_id_;
 #endif
 
     while (!C.empty())
@@ -944,9 +924,9 @@ void HNSW::aprSearchLayerSummary(uint8_t* q, int ef)
             {
                 visited_.insert(ne.node_order);
 #else
-            if (e->actual_node_count_ < actual_node_count_)
+            if (e->visid_id_ < visid_id_)
             {
-                e->actual_node_count_ = actual_node_count_;
+                e->visid_id_ = visid_id_;
 #endif
                 int32_t distance;
 //                if (nc->explored_count > EXPLORE_COUNT_TRESHOLD) {
@@ -997,7 +977,7 @@ void HNSW::aprSearchLayerDoubleSummary(uint8_t* q, int ef)
 #ifdef VISIT_HASH
     visited_.insert(std::get<2>(apr_W.front()));
 #else
-    std::get<0>(apr_W.front())->actual_node_count_ = actual_node_count_;
+    std::get<0>(apr_W.front())->visid_id_ = visid_id_;
 #endif
 
     while (!C.empty())
@@ -1023,9 +1003,9 @@ void HNSW::aprSearchLayerDoubleSummary(uint8_t* q, int ef)
             {
                 visited_.insert(ne.node_order);
 #else
-            if (e->actual_node_count_ < actual_node_count_)
+            if (e->visid_id_ < visid_id_)
             {
-                e->actual_node_count_ = actual_node_count_;
+                e->visid_id_ = visid_id_;
 #endif
                 int32_t distance = aprDistanceSummaryFixedSize(nc->summary, node_summary_position, q_delta, c_distance,
                                                                row1_size);
@@ -1109,11 +1089,7 @@ void HNSW::selectNeighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R,
             }
 
         }
-#ifdef COUNT_INWARD_DEGREE
-        if (q_is_close || W_[i].node->inward_count <= M_/4)
-#else
         if (q_is_close)
-#endif
         {
             R.emplace_back(W[i]);
             s++;

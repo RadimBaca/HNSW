@@ -1,11 +1,13 @@
 #include <chrono>
 
 #include "hnsw.h"
+#include "csw.h"
 #include <fstream>
 
 #define FILE_NAME       "sift-128-euclidean.hdf5"
 
-void sift_test();
+void siftTestFromBinnaryData();
+void unitTestCsw();
 
 int main(void)
 {
@@ -67,7 +69,7 @@ int main(void)
             }
             hnsw.insert(v);
         }
-        hnsw.saveKNNG("test_100.bin");
+        hnsw.saveGraph("test_100.bin");
 
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
@@ -91,7 +93,7 @@ int main(void)
     {
         float *v = new float[vsize];
         HNSW hnsw(10, 10, 20);
-        hnsw.loadKNNG("test_100.bin");
+        hnsw.loadGraph("test_100.bin");
 
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
@@ -157,14 +159,116 @@ int main(void)
 #endif
 
 #ifdef MAIN_RUN_CREATE_AND_QUERY_WITHOUT_HDF5
-    sift_test();
+    siftTestFromBinnaryData();
 #endif
+
+#ifdef MAIN_UNIT_TESTING_CSW
+    unitTestCsw();
+
     return 0;
 }
 
+void unitTestCsw() {
+    constexpr int vcount = 500;
+    constexpr int vsize = 128;
+
+#ifndef LOAD_GRAPH
+    {
+            HNSW hnsw(5, 5, 20);
+            hnsw.init(vsize, vcount);
+
+            float *v = new float[vsize];
+            for (int i = 0; i < vcount; i++) {
+                for (int k = 0; k < vsize; k++) {
+                    v[k] = ((float) (rand() % 10000)) / 100;
+                }
+                hnsw.insert(v);
+            }
+            hnsw.saveGraph("test_500.bin");
 
 
-void sift_test() {
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+            hnsw.min_value = 0;
+            hnsw.max_value = 100;
+            hnsw.computeApproximateVector();
+#endif
+            for (int k = 0; k < vsize; k++) {
+                v[k] = 50;
+            }
+            hnsw.knn(v, 10);
+            for (auto r : hnsw.apr_W)
+            {
+                int x = std::get<2>(r);
+                int y = std::get<1>(r);
+                std::cout << x << "(" << y << ") ";
+            }
+            std::cout << "\n";
+        }
+#endif
+
+    {
+        float *v = new float[vsize];
+
+        Csw csw;
+        auto start = std::chrono::system_clock::now();
+        csw.load_index("sift_1M.bin", 50, 150);
+        //csw.load_index("test_500.bin", 60, 150);
+        auto end = std::chrono::system_clock::now();
+        std::cout << (double) std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000
+                  << " [ms]";
+        csw.printInfo();
+
+//        HNSW hnsw(10, 10, 20);
+//        hnsw.loadGraph("test_10000.bin");
+//
+//
+//#ifdef COMPUTE_APPROXIMATE_VECTOR
+//        hnsw.min_value = 0;
+//        hnsw.max_value = 100;
+//        hnsw.computeApproximateVector();
+//#endif
+//        hnsw.printInfo(false);
+//#ifdef COLLECT_STAT
+//        hnsw.stat_.print_tree_info();
+//#endif
+//
+//        for (int k = 0; k < vsize; k++) {
+//            v[k] = 50;
+//        }
+//        hnsw.knn(v, 10);
+//        for (auto r : hnsw.apr_W)
+//        {
+//            int x = std::get<2>(r);
+//            int y = std::get<1>(r);
+//            std::cout << x << "(" << y << ") ";
+//        }
+//        std::cout << "\n";
+//
+//        auto start = std::chrono::system_clock::now();
+//        for (int i = 0; i < 100; i++) {
+//            //std::cout << "-------------------\n";
+//            for (int k = 0; k < vsize; k++) {
+//                v[k] = ((float) (rand() % 10000)) / 100;
+//            }
+//            hnsw.knn(v, 3);
+//
+//            //for (int k = 0; k < 3; k++)
+//            //{
+//            //    hnsw.W_[k]->print(vsize);
+//            //}
+//        }
+//        auto end = std::chrono::system_clock::now();
+//        std::cout << (double) std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000
+//                  << " [ms]";
+//#ifdef COLLECT_STAT
+//        hnsw.stat_.print();
+//#endif
+    }
+#endif
+}
+
+
+void siftTestFromBinnaryData() {
     size_t node_count = 1000000;
     size_t qsize = 10000;
     //size_t qsize = 1000;

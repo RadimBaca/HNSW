@@ -237,6 +237,7 @@ public:
 
 	std::vector<Neighbors> W_;
 	std::unordered_map<pointer_t, uint32_t> distances_;
+	int visid_id;
 #ifdef VISIT_HASH
 	linearHash visited_; // TODO replace by some different hashing technique (or cuckoo filter)
 #endif
@@ -272,6 +273,7 @@ public:
           Mmax0_(Mmax * 2),
           efConstruction_(efConstruction),
           actual_node_count_(-1),
+          visid_id(-1),
           max_node_count_(0),
           data_cleaned_(true),
           min_M_(M / 2)
@@ -298,34 +300,20 @@ public:
 
 	void insert(float* q);
 	void aproximateKnn(float* q, int k, int ef);
+    void knn(float* q, int ef);
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 	void computeApproximateVector();
 	int computeSummaries(Node* node, pointer_t node_order, uint32_t vector_size, int* overflows);
+    inline uint8_t* aprGetNodeVector(pointer_t node_order) { return apr_vector_data + node_order * vector_size_; }
+
 #endif
 	void printInfo(bool all);
 	void print(int max_count);
 
     void saveGraph(const char* filename);
     void loadGraph(const char* filename);
-private:
 
-    void knn(float* q, int ef);
-	void searchLayerOne(float* q);
-	void searchLayer(float* q, int ef);
-	void selectNeighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned);
-
-	inline float* getNodeVector(pointer_t node_order) { return vector_data_ + node_order * vector_size_; }
-
-#ifdef COMPUTE_APPROXIMATE_VECTOR
-	void aprSearchLayerOne(uint8_t* q);
-	void aprSearchLayer(uint8_t* q, int ef);
-	void aprSearchLayerSummary(uint8_t* q, int ef);
-	void aprSearchLayerDoubleSummary(uint8_t* q, int ef);
-
-	inline uint8_t* aprGetNodeVector(pointer_t node_order) { return apr_vector_data + node_order * vector_size_; }
-
-#endif
-
+    inline float* getNodeVector(pointer_t node_order) { return vector_data_ + node_order * vector_size_; }
 
 
 
@@ -556,7 +544,23 @@ private:
 
 		return result;
 	}
+#endif
 
+    void searchLayerOne(float* q);
+    void searchLayer(float* q, int ef);
+    void searchLayer(float* q, int ef, Node* start, pointer_t start_node_order);
+    void selectNeighbors(std::vector<Neighbors>& W, std::vector<Neighbors>& R, int M, bool keepPruned);
+
+
+#ifdef COMPUTE_APPROXIMATE_VECTOR
+    void aprSearchLayerOne(uint8_t* q);
+    void aprSearchLayer(uint8_t* q, int ef);
+    void aprSearchLayerSummary(uint8_t* q, int ef);
+    void aprSearchLayerDoubleSummary(uint8_t* q, int ef);
+#endif
+
+private:
+#ifdef COMPUTE_APPROXIMATE_VECTOR
 	void aprChangeLayer()
 	{
 		for (int i = 0; i < apr_W.size(); i++)
@@ -572,6 +576,7 @@ private:
 	}
 #endif
 
+
 	void changeLayer()
 	{
 		for (int i = 0; i < W_.size(); i++)
@@ -580,9 +585,6 @@ private:
 			auto node = n.node;
             W_[i].node = W_[i].node->lower_layer;
 			W_[i].node->copyInsertValues(*node);
-//#ifdef VISIT_HASH
-//			visited_.insert(W_[i]->uniqueId);
-//#endif
 		}
 	}
 
@@ -593,11 +595,5 @@ private:
         vector_parts = vsize / 16;
     }
 
-//    void clear_explored_count()
-//    {
-//	    for (auto& n: layers_[0]->nodes)
-//        {
-//	        n->explored_count = 0;
-//        }
-//    }
+
 };

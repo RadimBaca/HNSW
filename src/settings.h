@@ -4,7 +4,8 @@
 //#define MAIN_CONVERT_HDF_TO_BIN
 //#define MAIN_UNIT_TESTING
 //#define MAIN_RUN_CREATE_AND_QUERY
-#define MAIN_RUN_CREATE_AND_QUERY_WITHOUT_HDF5
+//#define MAIN_RUN_CREATE_AND_QUERY_WITHOUT_HDF5
+#define MAIN_UNIT_TESTING_CSW
 
 #define LOAD_GRAPH
 constexpr char load_file[] = "sift_1M.bin";
@@ -14,21 +15,19 @@ constexpr char load_file[] = "sift_1M.bin";
 
 #define VISIT_HASH // visited_ is implemented using a hash map
 
-//#define COUNT_INWARD_DEGREE
-#define COMPUTE_APPROXIMATE_VECTOR
+#define COMPUTE_APPROXIMATE_VECTOR // it basicaly means that we are going to use uint8 instead of float
 //#define APR_DEBUG
 
-constexpr int kX = 255;
 
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 
 ///////////////// Select one from these options
-//#define USE_PLAIN_CHAR
-#define USE_TRESHOLD_SUMMARY
+#define USE_PLAIN_CHAR // summary is not used at all
+//#define USE_TRESHOLD_SUMMARY
 //#define USE_TWO_FIXED_MAX
 
 
-constexpr uint8_t DISTANCE_TRESHOLD = 16;
+constexpr int DISTANCE_TRESHOLD = 16;
 
 constexpr int EXPLORE_COUNT_TRESHOLD = 10;
 
