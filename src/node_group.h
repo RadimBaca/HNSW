@@ -24,11 +24,11 @@ public:
 
     int group_id_;
     std::vector<pointer_t> nodes_;
-    uint8_t node_center_order_;
+    uint8_t center_node_index_;
     GuideGroup* guidepost_;
     std::vector<int8_t> summary_; // TODO vector can be easily replaced by a simple array
     uint8_t* local_neighbors_;
-    int *global_neighbors_;
+    std::pair<int,int> *global_neighbors_; // group_id + node_index, node_order
 
     NodeGroup() :group_id_(max_count++),
                  guidepost_(nullptr),

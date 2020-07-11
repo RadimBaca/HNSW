@@ -124,7 +124,7 @@ void Csw::sortingNodesIntoGroups(const int N, const int X)
 #ifdef COLLECT_STAT
             statistics_.no_unassigned_nodes_++;
 #endif
-            //hnsw->searchLayer(hnsw->getNodeVector(node_order), 100, n, node_order);
+            //hnsw->groupSearchLayer(hnsw->getNodeVector(node_order), 100, n, node_order);
             // count the groups of finded nodes
             //for (auto &nr : hnsw->W_) {
             for (auto& nr: n->neighbors) {
@@ -167,6 +167,7 @@ void Csw::groupMaterialization() {
     node_group_ = new int[hnsw->actual_node_count_ + 1];
     std::vector<uint8_t> local_neigh;
     std::vector<int> global_neigh;
+    std::vector<int> global_neigh_node_order;
 
     uint32_t *group_assignment_distance_order = new uint32_t[kMaxGroupsPerNode * (hnsw->actual_node_count_ + 1)];
     memset(group_assignment_distance_order, 0, kMaxGroupsPerNode * sizeof(uint32_t) * (hnsw->actual_node_count_ + 1));
@@ -186,29 +187,28 @@ void Csw::groupMaterialization() {
         }
 
         uint32_t min_distance = -1;
-        group.node_center_order_ = -1;
+        group.center_node_index_ = -1;
         int node_index = 0;
         for (auto &n : group.nodes_) {
             auto dist = hnsw->aprDistance(group_pivot, hnsw->aprGetNodeVector(n));
             if (dist < min_distance) {
-                group.node_center_order_ = node_index;
+                group.center_node_index_ = node_index;
                 min_distance = dist;
             }
             node_index++;
         }
-        // TODO remove group.node_center_order_ from nodes_
         // start compute distances from center and compute summaries
         group.guidepost_ = new GuideGroup[group.nodes_.size()];
-        auto vector = hnsw->aprGetNodeVector(group.node_center_order_);
+        auto vector = hnsw->aprGetNodeVector(group.nodes_[group.center_node_index_]);
         for (int i = 0; i < hnsw->vector_size_; i++) {
             group.summary_.push_back(vector[i]); // TODO insert into vector and later copy into array (at the end)
         }
-        group.guidepost_[group.node_center_order_ ].summary = 0;
+        group.guidepost_[group.center_node_index_ ].summary = 0;
         int node_group_index = 0;
         for (auto &n_order : group.nodes_) {
             uint32_t dist = 0;
-            if (node_group_index != group.node_center_order_) {
-                dist = hnsw->aprDistance(hnsw->aprGetNodeVector(group.node_center_order_),
+            if (node_group_index != group.center_node_index_) {
+                dist = hnsw->aprDistance(hnsw->aprGetNodeVector(group.nodes_[group.center_node_index_]),
                                          hnsw->aprGetNodeVector(n_order));
                 group.guidepost_[node_group_index].summary = group.summary_.size();
             }
@@ -245,6 +245,7 @@ void Csw::groupMaterialization() {
     for (auto &group : groups_) {
         local_neigh.clear();
         global_neigh.clear();
+        global_neigh_node_order.clear();
         int node_group_index = 0;
         for (auto &n : group.nodes_) {
             group.guidepost_[node_group_index].local = local_neigh.size();
@@ -257,6 +258,7 @@ void Csw::groupMaterialization() {
                     int position = localgroup - group.nodes_.begin();
                     local_neigh.push_back(localgroup - group.nodes_.begin());
                 } else {
+                    // transalate neig.node_order to group_id and local_node_order
                     int remote_group_id = node_group_[neig.node_order];
                     auto remote_group = std::lower_bound(groups_[remote_group_id].nodes_.begin(),
                                                          groups_[remote_group_id].nodes_.end(), neig.node_order);
@@ -265,6 +267,7 @@ void Csw::groupMaterialization() {
                                 "Csw::groupMaterialization - the node id was not founded in the group!");
                     int remote_local_node_order = remote_group - groups_[remote_group_id].nodes_.begin();
                     global_neigh.push_back(mergeGlobalId(remote_group_id, remote_local_node_order));
+                    global_neigh_node_order.push_back(neig.node_order);
                 }
             }
             group.guidepost_[node_group_index].local_count =
@@ -276,8 +279,12 @@ void Csw::groupMaterialization() {
         // we use auxiliary vectors, therefore, we need to copy them into group
         group.local_neighbors_ = new uint8_t[local_neigh.size()];
         std::copy(local_neigh.begin(), local_neigh.end(), group.local_neighbors_);
-        group.global_neighbors_ = new int[global_neigh.size()];
-        std::copy(global_neigh.begin(), global_neigh.end(), group.global_neighbors_);
+        group.global_neighbors_ = new std::pair<int,int>[global_neigh.size()];
+        for (int i = 0; i < global_neigh.size(); i++) {
+            group.global_neighbors_[i].first = global_neigh[i];
+            group.global_neighbors_[i].second = global_neigh_node_order[i];
+        }
+        //std::copy(global_neigh.begin(), global_neigh.end(), group.global_neighbors_);
 #ifdef COLLECT_STAT
         statistics_.no_local_references_ += local_neigh.size();
         statistics_.no_global_references_ += global_neigh.size();
@@ -300,6 +307,136 @@ bool Csw::assignIntoGroup(int *group_assignment, NodeGroup &group, const int nod
     }
     return false;
 }
+
+std::vector<int>& Csw::knn(float* q, int ef)
+{
+    int32_t L = hnsw->layers_.size() - 1;
+    Node* ep = nullptr;
+    int ep_node_order;
+
+    ep = hnsw->layers_[L]->enter_point;
+    ep_node_order = hnsw->layers_[L]->ep_node_order;
+    hnsw->apr_W.clear();
+    Node::computeApproximateVector(hnsw->apr_q, q, hnsw->shift, hnsw->vector_size_);
+    auto dist = hnsw->aprDistance(hnsw->aprGetNodeVector(hnsw->layers_[L]->ep_node_order), hnsw->apr_q);
+    hnsw->apr_W.emplace_back(ep, dist, ep_node_order);
+    hnsw->visited_.clear();
+    hnsw->visited_.insert(ep_node_order);
+
+    for (int32_t i = L; i > 0; i--)
+    {
+        hnsw->aprSearchLayerOne(hnsw->apr_q);
+        hnsw->aprChangeLayer();
+    }
+
+    hnsw->visited_.clear();
+    sq_.clear();
+    int group_id = node_group_[std::get<2>(hnsw->apr_W[0])];
+    auto& group = groups_[group_id];
+    auto node_index_iterator = std::find(group.nodes_.begin(), group.nodes_.end(), std::get<2>(hnsw->apr_W[0]));
+//    pointer_t center_node_order = groups_[group_id].nodes_[groups_[group_id].center_node_index_];
+//    hnsw->visited_.insert(center_node_order);
+//    dist = hnsw->aprDistance(hnsw->apr_q, reinterpret_cast<uint8_t *>(groups_[group_id].summary_.data()));
+//    sq_.emplace_back(group_id, groups_[group_id].center_node_index_, dist);
+    GuideGroup& guide = group.guidepost_[node_index_iterator - group.nodes_.begin()];
+    hnsw->visited_.insert(std::get<2>(hnsw->apr_W[0]));
+    dist = hnsw->aprDistance(hnsw->apr_q, reinterpret_cast<uint8_t *>(&group.summary_[guide.summary]));
+    sq_.emplace_back(group_id, node_index_iterator - group.nodes_.begin(), dist);
+
+    // group search layer
+    groupSearchLayer(hnsw->apr_q, ef);
+    std::sort(sq_.begin(), sq_.end(), CompareSearchItemHeapReverse());
+    result_.clear();
+    for (auto& item : sq_) {
+        result_.push_back(groups_[item.group_id_].nodes_[item.node_index_]);
+    }
+    return result_;
+}
+
+
+void Csw::groupSearchLayer(uint8_t* q, int ef)
+{
+    std::vector<SearchItem> C;
+
+    for (auto& n : sq_)
+    {
+        C.emplace_back(n);
+    }
+//    std::make_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
+//    std::make_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
+    auto f = sq_[0].distance_;
+    while (!C.empty())
+    {
+        auto c = C.front();
+        std::pop_heap(C.begin(), C.end(), CompareSearchItemHeap()); // TODO debug
+        C.pop_back();
+
+        if (c.distance_ > f) break;
+        NodeGroup& group = groups_[c.group_id_];
+        GuideGroup& guide = group.guidepost_[c.node_index_];
+        uint8_t* local_neighbors = &group.local_neighbors_[guide.local];
+//        std::cout << "-- (node_order), gr_id, node_index  (" << group.nodes_[c.node_index_] << "), " << c.group_id_ << ", " << (int)c.node_index_ << ", " << c.distance_ << "\n";
+//            std::cout << "  n_count " << group.nodes_.size() << "\n";
+//        std::cout << "  gd_local " << guide.local << "\n";
+//        std::cout << "  gd_global " << guide.global << "\n";
+//        std::cout << "  gd_localcnt " << (int)guide.local_count << "\n";
+//        std::cout << "  gd_globalcnt " << (int)guide.global_count << "\n";
+//            std::cout << "  gd_summary " << guide.summary << "\n";
+//            std::cout << "  sum_size " << group.summary_.size() << "\n";
+//            std::cout << "           " << (int)group.local_neighbors_[guide.local] << "\n";
+//            std::cout << "  local_neigh " << (int)*local_neighbors << "\n";
+        for (int i = 0; i < guide.local_count; i++) {
+            if (!hnsw->visited_.get(group.nodes_[*local_neighbors])) {
+                hnsw->visited_.insert(group.nodes_[*local_neighbors]);
+                //std::cout << "    L: (" << group.nodes_[*local_neighbors] << ")  " << (int)*local_neighbors << "\n";
+                GuideGroup& nguide = group.guidepost_[*local_neighbors];
+                uint32_t dist = hnsw->aprDistance(q, reinterpret_cast<uint8_t *>(&group.summary_[nguide.summary]));
+
+                if (dist < f || sq_.size() < ef) {
+                    C.emplace_back(c.group_id_, *local_neighbors, dist);
+                    std::push_heap(C.begin(), C.end(), CompareSearchItemHeap());
+                    sq_.emplace_back(c.group_id_, *local_neighbors, dist);
+                    std::push_heap(sq_.begin(), sq_.end(), CompareSearchItemHeapReverse());
+                    if (sq_.size() > ef)
+                    {
+                        std::pop_heap(sq_.begin(), sq_.end(), CompareSearchItemHeapReverse());
+                        sq_.pop_back();
+                    }
+                    f = sq_.front().distance_;
+                }
+            }
+            local_neighbors++;
+        }
+        std::pair<int,int>* global_neighbors = &group.global_neighbors_[guide.global];
+        for (int i = 0; i < guide.global_count; i++) {
+            if (!hnsw->visited_.get(global_neighbors->second)) {
+                hnsw->visited_.insert(global_neighbors->second);
+                uint8_t node_index;
+                int group_id = splitGlobalId(node_index, global_neighbors->first);
+                //std::cout << "    G: (" << global_neighbors->second << ")  " << group_id << ", " << (int)node_index << "\n";
+                // TODO - check, whether the group was already visited, if not visit its center first
+                NodeGroup& group = groups_[group_id];
+                GuideGroup& nguide = group.guidepost_[node_index];
+                uint32_t dist = hnsw->aprDistance(q, reinterpret_cast<uint8_t *>(&group.summary_[nguide.summary]));
+                if (dist < f || sq_.size() < ef) {
+                    C.emplace_back(group_id, node_index, dist);
+                    std::push_heap(C.begin(), C.end(), CompareSearchItemHeap());
+                    sq_.emplace_back(group_id, node_index, dist);
+                    std::push_heap(sq_.begin(), sq_.end(), CompareSearchItemHeapReverse());
+                    if (sq_.size() > ef)
+                    {
+                        std::pop_heap(sq_.begin(), sq_.end(), CompareSearchItemHeapReverse());
+                        sq_.pop_back();
+                    }
+                    f = sq_.front().distance_;
+                }
+            }
+            global_neighbors++;
+        }
+    }
+    //std::cout << "finish\n";
+}
+
 
 #ifdef COLLECT_STAT
 void Csw::printInfo()

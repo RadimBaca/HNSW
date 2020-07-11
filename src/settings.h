@@ -5,7 +5,8 @@
 //#define MAIN_UNIT_TESTING
 //#define MAIN_RUN_CREATE_AND_QUERY
 //#define MAIN_RUN_CREATE_AND_QUERY_WITHOUT_HDF5
-#define MAIN_UNIT_TESTING_CSW
+//#define MAIN_UNIT_TESTING_CSW
+#define MAIN_RUN_CSW
 
 #define LOAD_GRAPH
 constexpr char load_file[] = "sift_1M.bin";

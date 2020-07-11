@@ -559,7 +559,7 @@ public:
     void aprSearchLayerDoubleSummary(uint8_t* q, int ef);
 #endif
 
-private:
+
 #ifdef COMPUTE_APPROXIMATE_VECTOR
 	void aprChangeLayer()
 	{

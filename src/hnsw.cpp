@@ -322,8 +322,6 @@ void HNSW::insert(float* q)
 void HNSW::knn(float* q, int ef)
 {
     int32_t L = layers_.size() - 1;
-    Node* down_node = nullptr;
-    Node* prev = nullptr;
     Node* ep = nullptr;
     int ep_node_order;
     visid_id++;
@@ -358,8 +356,6 @@ void HNSW::knn(float* q, int ef)
 void HNSW::aproximateKnn(float* q, int k, int ef)
 {
     int32_t L = layers_.size() - 1;
-    Node* down_node = nullptr;
-    Node* prev = nullptr;
     Node* ep = nullptr;
     int ep_node_order;
     visid_id++;
@@ -833,6 +829,7 @@ void HNSW::aprSearchLayer(uint8_t* q, int ef)
         n->visid_id_ = visid_id_;
 
 #endif
+//        std::cout << "explore (" << std::get<2>(n) << "), " << std::get<1>(n) << "\n";
     }
     std::make_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
     std::make_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
@@ -842,10 +839,11 @@ void HNSW::aprSearchLayer(uint8_t* q, int ef)
         auto c = C.front();
         std::pop_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
         C.pop_back();
-
+//        std::cout << "explore   (?), " << std::get<1>(c) << "\n";
         if (std::get<1>(c) > f) break;
         for (auto& ne : std::get<0>(c)->neighbors)
         {
+//            std::cout << "(" << ne.node_order << ")\n";
             auto e = ne.node;
 #ifdef VISIT_HASH
             if (!visited_.get(ne.node_order))
@@ -865,6 +863,7 @@ void HNSW::aprSearchLayer(uint8_t* q, int ef)
                     std::push_heap(C.begin(), C.end(), CompareByDistanceInTupleHeap());
                     apr_W.emplace_back(e, dist, ne.node_order);
                     std::push_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
+//                    std::cout << "   (" << ne.node_order << ") " << dist << "\n";
                     if (apr_W.size() > ef)
                     {
                         std::pop_heap(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
@@ -881,6 +880,7 @@ void HNSW::aprSearchLayer(uint8_t* q, int ef)
             }
         }
     }
+        exit(0);
 }
 
 

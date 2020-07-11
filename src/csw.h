@@ -15,12 +15,41 @@ constexpr int kMaxNodesPerGroup = 255;
 // Clustered small world data structure
 class Csw
 {
+    struct SearchItem {
+        int group_id_;
+        uint8_t node_index_;
+        //int node_order_;
+        uint32_t distance_;
+
+        SearchItem(int group_id, uint8_t node_order_in_group, uint32_t distance)
+            : group_id_(group_id)
+            , node_index_(node_order_in_group)
+            //, node_order_(node_order)
+            , distance_(distance)
+        {
+        }
+    };
+    struct CompareSearchItemHeap {
+        constexpr bool operator()(SearchItem& i1, SearchItem& i2) const noexcept {
+            return i1.distance_ > i2.distance_;
+        }
+    };
+    struct CompareSearchItemHeapReverse {
+        constexpr bool operator()(SearchItem& i1, SearchItem& i2) const noexcept {
+            return i1.distance_ < i2.distance_;
+        }
+    };
+
     std::vector<NodeGroup> groups_;
 
     HNSW *hnsw;
     int *group_assignment_;
-    int *node_group_;
+    int *node_group_; // for each node
     bool index_loaded_;
+
+    // query variables
+    std::vector<int> result_;
+    std::vector<SearchItem> sq_;
 
 #ifdef COLLECT_STAT
     class Stat
@@ -39,27 +68,28 @@ class Csw
     bool assignIntoGroup(int *group_assignment, NodeGroup &group, const int node_order);
     void groupMaterialization();
     void sortingNodesIntoGroups(const int N, const int X);
+    void groupSearchLayer(uint8_t* q, int ef);
 
-    inline int mergeGlobalId(int group_id, int local_order);
-    inline int splitGlobalId(uint8_t & local_order, int global_id);
+    inline int mergeGlobalId(int group_id, int node_index);
+    inline int splitGlobalId(uint8_t & node_index, int global_id);
 public:
     Csw();
     ~Csw();
 
     void load_index(const char* file_name, const int N, const int X);
-
+    std::vector<int>& knn(float* q, int ef);
 
     void printInfo();
 
 
 };
 
-int Csw::mergeGlobalId(int group_id, int local_order) {
-    return (group_id << 8) + local_order;
+int Csw::mergeGlobalId(int group_id, int node_index) {
+    return (group_id << 8) + node_index;
 }
 
-int Csw::splitGlobalId(uint8_t & local_order, int global_id) {
-    local_order = global_id;
+int Csw::splitGlobalId(uint8_t & node_index, int global_id) {
+    node_index = global_id;
     return global_id >> 8;
 }
 
