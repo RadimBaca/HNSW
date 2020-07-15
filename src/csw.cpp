@@ -43,7 +43,7 @@ void Csw::sortingNodesIntoGroups(const int N, const int X)
 {
 #ifdef COMPUTE_APPROXIMATE_VECTOR
     pointer_t node_order = 0;
-    int expected_unassigned_count = 3 * N / 4;
+    int expected_unassigned_count = 3 * N / 8;
     // creation of basic groups
     std::cout << "finding the basic groups\n";
     for (auto& n : hnsw->layers_[0]->nodes)

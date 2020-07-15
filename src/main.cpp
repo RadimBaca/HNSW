@@ -261,7 +261,7 @@ void siftTestFromBinnaryDataCsw() {
 
     Csw csw;
     auto start = std::chrono::system_clock::now();
-    csw.load_index("sift_1M.bin", 50, 150);
+    csw.load_index("sift_1M.bin", 80, 120);
     auto end = std::chrono::system_clock::now();
     std::cout << (double) std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000
               << " [ms]";
