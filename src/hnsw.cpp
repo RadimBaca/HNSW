@@ -406,8 +406,8 @@ void HNSW::aproximateKnn(float* q, int k, int ef)
         aprSearchLayerOne(apr_q);
         aprChangeLayer();
 #else
-        search_layer_one(q);
-        change_layer();
+        searchLayerOne(q);
+        changeLayer();
 #endif
     }
 #ifdef VISIT_HASH
@@ -443,7 +443,7 @@ void HNSW::aproximateKnn(float* q, int k, int ef)
 #endif
     sort(apr_W.begin(), apr_W.end(), CompareByDistanceInTuple());
 #else
-    search_layer(q, ef);
+    searchLayer(q, ef);
     sort(W_.begin(), W_.end(), neighborcmp_nearest());
 #endif
 }
@@ -1189,7 +1189,9 @@ void HNSW::saveGraph(const char* filename)
         f.write(reinterpret_cast<const char *>(&max_node_count_), sizeof(max_node_count_));
         f.write(reinterpret_cast<const char *>(&vector_size_), sizeof(vector_size_));
         f.write(reinterpret_cast<const char *>(&actual_node_count_), sizeof(actual_node_count_));
+#ifdef COMPUTE_APPROXIMATE_VECTOR
         f.write(reinterpret_cast<const char *>(&max_value), sizeof(max_value));
+#endif
         f.write(reinterpret_cast<const char *>(vector_data_), sizeof(float) * max_node_count_ * vector_size_);
         auto l_size = layers_.size();
         f.write(reinterpret_cast<const char *>(&l_size), sizeof(l_size));
@@ -1248,11 +1250,13 @@ void HNSW::loadGraph(const char* filename)
             return;
         }
 
-        max_value = 220; // TODO write and read
+        //max_value = 220; // TODO write and read
         f.read(reinterpret_cast<char *>(&max_node_count_), sizeof(max_node_count_));
         f.read(reinterpret_cast<char *>(&vector_size_), sizeof(vector_size_));
         f.read(reinterpret_cast<char *>(&actual_node_count_), sizeof(actual_node_count_));
+#ifdef COMPUTE_APPROXIMATE_VECTOR
         f.read(reinterpret_cast<char *>(&max_value), sizeof(max_value));
+#endif
         init(vector_size_, max_node_count_);
         f.read(reinterpret_cast<char *>(vector_data_), sizeof(float) * max_node_count_ * vector_size_);
         auto l_size = layers_.size();

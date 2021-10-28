@@ -174,14 +174,14 @@ void sift_test() {
     uint32_t k = 10;
 
     float* mass = new float[node_count * vecdim];
-    std::ifstream input("../sift1M/sift1M.bin", std::ios::binary);
+    std::ifstream input("sift1M/sift1M.bin", std::ios::binary);
     if (!input.is_open()) std::runtime_error("Input data file not opened!");
     input.read((char*)mass, node_count * vecdim * sizeof(float));
     input.close();
 
     float* massQ = new float[qsize * vecdim];
     //ifstream inputQ("../siftQ100k.bin", ios::binary);
-    std::ifstream inputQ("../sift1M/siftQ1M.bin", std::ios::binary);
+    std::ifstream inputQ("sift1M/siftQ1M.bin", std::ios::binary);
     if (!input.is_open()) std::runtime_error("Input query file not opened!");
     //ifstream inputQ("../../1M_d=4q.bin", ios::binary);
     inputQ.read((char*)massQ, qsize * vecdim * sizeof(float));
@@ -189,7 +189,7 @@ void sift_test() {
 
     unsigned int* massQA = new unsigned int[qsize * answer_size];
     //ifstream inputQA("../knnQA100k.bin", ios::binary);
-    std::ifstream inputQA("../sift1M/knnQA1M.bin", std::ios::binary);
+    std::ifstream inputQA("sift1M/knnQA1M.bin", std::ios::binary);
     if (!input.is_open()) std::runtime_error("Input result file not opened!");
     inputQA.read((char*)massQA, qsize * answer_size * sizeof(int));
     inputQA.close();

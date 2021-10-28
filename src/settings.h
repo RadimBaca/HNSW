@@ -6,7 +6,8 @@
 //#define MAIN_RUN_CREATE_AND_QUERY
 #define MAIN_RUN_CREATE_AND_QUERY_WITHOUT_HDF5
 
-#define LOAD_GRAPH
+
+//#define LOAD_GRAPH // this should uncommented if you want to load the index instead of creating a new one
 constexpr char load_file[] = "sift_1M.bin";
 
 //#define DEBUG_NET // TODO implement assert
@@ -15,7 +16,7 @@ constexpr char load_file[] = "sift_1M.bin";
 #define VISIT_HASH // visited_ is implemented using a hash map
 
 //#define COUNT_INWARD_DEGREE
-#define COMPUTE_APPROXIMATE_VECTOR
+//#define COMPUTE_APPROXIMATE_VECTOR
 //#define APR_DEBUG
 
 constexpr int kX = 255;
